@@ -1,52 +1,79 @@
 import datetime
+import logging
 
 import ccxt
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
 
-from app.config import DB_URL, DB_ENABLED
+from app.config import DB_ENABLED
+from app.db.init_db import SessionLocal, init_db
 from app.db.models import Signal
 
-engine = create_engine(DB_URL) if DB_ENABLED else None
+if DB_ENABLED:
+    init_db()
 
+logger = logging.getLogger(__name__)
 exchange = ccxt.binance()
 
 
-def save_signal(signal):
+def save_signal(signal_data):
     if not DB_ENABLED:
         return
-    with Session(engine) as session:
-        s = Signal(**signal, hit="PENDING")
+    session = SessionLocal()
+    try:
+        s = Signal(**signal_data)
         session.add(s)
         session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error(f"DB error saving signal: {e}")
+    finally:
+        session.close()
 
 
 def check_hit_signals():
     if not DB_ENABLED:
         return
-    with Session(engine) as session:
-        signals = session.query(Signal).filter(Signal.hit == "PENDING").all()
-        for s in signals:
-            current_price = exchange.fetch_ticker(s.pair)['last']
-            if s.side == "LONG" and current_price >= s.take_profit:
-                s.hit = "SUCCESS"
-            elif s.side == "LONG" and current_price <= s.stop_loss:
-                s.hit = "FAILURE"
-            elif s.side == "SHORT" and current_price <= s.take_profit:
-                s.hit = "SUCCESS"
-            elif s.side == "SHORT" and current_price >= s.stop_loss:
-                s.hit = "FAILURE"
+    session = SessionLocal()
+    try:
+        pending = session.query(Signal).filter(Signal.hit == 'PENDING').all()
+        for s in pending:
+            current = exchange.fetch_ticker(s.pair)['last']
+            if s.side == 'LONG':
+                if current >= s.take_profit:
+                    s.hit = 'SUCCESS'
+                elif current <= s.stop_loss:
+                    s.hit = 'FAILURE'
             else:
-                continue
-            s.hit_timestamp = datetime.datetime.utcnow()
+                if current <= s.take_profit:
+                    s.hit = 'SUCCESS'
+                elif current >= s.stop_loss:
+                    s.hit = 'FAILURE'
+            if s.hit != 'PENDING':
+                s.hit_timestamp = datetime.datetime.utcnow()
         session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error(f"DB error checking hits: {e}")
+    finally:
+        session.close()
 
 
 def summarize_and_notify():
+    # returns counts for last 24h
     if not DB_ENABLED:
-        return
-    today = datetime.datetime.utcnow() - datetime.timedelta(days=1)
-    with Session(engine) as session:
-        success = session.query(Signal).filter(Signal.hit == "SUCCESS", Signal.hit_timestamp > today).count()
-        fail = session.query(Signal).filter(Signal.hit == "FAILURE", Signal.hit_timestamp > today).count()
-        return f"Summary of last 24h: {success} SUCCESS / {fail} FAILURE"
+        return 'DB disabled'
+    now = datetime.datetime.utcnow()
+    since = now - datetime.timedelta(days=1)
+    session = SessionLocal()
+    try:
+        succ = session.query(Signal).filter(
+            Signal.hit == 'SUCCESS', Signal.hit_timestamp >= since
+        ).count()
+        fail = session.query(Signal).filter(
+            Signal.hit == 'FAILURE', Signal.hit_timestamp >= since
+        ).count()
+        return f"Last 24h: {succ} SUCCESS / {fail} FAILURE"
+    except Exception as e:
+        logger.error(f"DB error summarizing: {e}")
+        return "Error"
+    finally:
+        session.close()
