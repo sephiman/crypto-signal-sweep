@@ -1,0 +1,8 @@
+ccxt~=4.4.80
+python-telegram-bot
+sqlalchemy~=2.0.40
+psycopg2-binary
+apscheduler~=3.11.0
+dotenv
+pandas~=2.2.3
+requests~=2.32.3

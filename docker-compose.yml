@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: signal_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: signaldb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"
+
+  app:
+    build: .
+    depends_on:
+      - postgres
+    environment:
+      - BINANCE_API_KEY=public
+      - BINANCE_API_SECRET=not_needed
+      - TELEGRAM_TOKEN=xxx
+      - TELEGRAM_CHAT_ID=xxx
+      - DB_ENABLED=true
+      - DB_USER=user
+      - DB_PASSWORD=password
+      - DB_NAME=signaldb
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - PAIRS=BTC/USDT,ETH/USDT
+      - TIMEFRAMES=15m,1h
+      - USE_HIGHER_TF_CONFIRM=false
+
+volumes:
+  pgdata:
+
+networks:
+  my-network:
+    external: true
+    name: all_dockers
