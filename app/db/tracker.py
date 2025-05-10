@@ -1,79 +1,92 @@
-import datetime
 import logging
+from datetime import datetime
+from typing import Dict
 
-import ccxt
+import numpy as np
+from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
-from app.config import DB_ENABLED
-from app.db.init_db import SessionLocal, init_db
-from app.db.models import Signal
-
-if DB_ENABLED:
-    init_db()
+from app.config import DB_URL, DB_ENABLED
+from app.db.models import Base, Signal
 
 logger = logging.getLogger(__name__)
-exchange = ccxt.binance()
+
+engine = None
+if DB_ENABLED:
+    engine = create_engine(DB_URL, echo=False, future=True)
+    Base.metadata.create_all(engine)
 
 
-def save_signal(signal_data):
+def _to_native(obj):
+    """Convert numpy types to native Python types for SQLAlchemy."""
+    if isinstance(obj, (np.generic,)):
+        return obj.item()
+    return obj
+
+
+def save_signal(signal: Dict):
+    """Insert a new Signal row, skipping if DB disabled."""
     if not DB_ENABLED:
         return
-    session = SessionLocal()
+
+    # Clean up any numpy types in the payload
+    cleaned = {k: _to_native(v) for k, v in signal.items()}
+
+    # default fields
+    cleaned.setdefault("hit", "PENDING")
+    cleaned.setdefault("hit_timestamp", None)
+
     try:
-        s = Signal(**signal_data)
-        session.add(s)
-        session.commit()
-    except Exception as e:
-        session.rollback()
+        with Session(engine) as session:
+            s = Signal(**cleaned)
+            session.add(s)
+            session.commit()
+            logger.info(f"Saved signal: {s.id} | {s.pair} {s.timeframe} {s.side}")
+    except SQLAlchemyError as e:
         logger.error(f"DB error saving signal: {e}")
-    finally:
-        session.close()
 
 
 def check_hit_signals():
+    """Scan pending signals; mark SUCCESS/FAILURE when SL/TP hit."""
     if not DB_ENABLED:
         return
-    session = SessionLocal()
-    try:
-        pending = session.query(Signal).filter(Signal.hit == 'PENDING').all()
+    import ccxt  # local import to avoid startup cost
+    exchange = ccxt.binance()
+
+    with Session(engine) as session:
+        pending = session.query(Signal).filter_by(hit="PENDING").all()
         for s in pending:
-            current = exchange.fetch_ticker(s.pair)['last']
-            if s.side == 'LONG':
+            ticker = exchange.fetch_ticker(s.pair)
+            current = float(ticker["last"])
+            if s.side == "LONG":
                 if current >= s.take_profit:
-                    s.hit = 'SUCCESS'
+                    s.hit = "SUCCESS"
                 elif current <= s.stop_loss:
-                    s.hit = 'FAILURE'
-            else:
+                    s.hit = "FAILURE"
+            elif s.side == "SHORT":
                 if current <= s.take_profit:
-                    s.hit = 'SUCCESS'
+                    s.hit = "SUCCESS"
                 elif current >= s.stop_loss:
-                    s.hit = 'FAILURE'
-            if s.hit != 'PENDING':
-                s.hit_timestamp = datetime.datetime.utcnow()
+                    s.hit = "FAILURE"
+            if s.hit != "PENDING":
+                s.hit_timestamp = datetime.utcnow()
+                logger.info(f"Signal {s.id} {s.side} → {s.hit} at {current:.4f}")
         session.commit()
-    except Exception as e:
-        session.rollback()
-        logger.error(f"DB error checking hits: {e}")
-    finally:
-        session.close()
 
 
 def summarize_and_notify():
-    # returns counts for last 24h
+    """Return a 24h summary string for Telegram (or None if DB disabled)."""
     if not DB_ENABLED:
-        return 'DB disabled'
-    now = datetime.datetime.utcnow()
-    since = now - datetime.timedelta(days=1)
-    session = SessionLocal()
-    try:
-        succ = session.query(Signal).filter(
-            Signal.hit == 'SUCCESS', Signal.hit_timestamp >= since
-        ).count()
-        fail = session.query(Signal).filter(
-            Signal.hit == 'FAILURE', Signal.hit_timestamp >= since
-        ).count()
-        return f"Last 24h: {succ} SUCCESS / {fail} FAILURE"
-    except Exception as e:
-        logger.error(f"DB error summarizing: {e}")
-        return "Error"
-    finally:
-        session.close()
+        return None
+
+    from datetime import timedelta
+
+    cutoff = datetime.utcnow() - timedelta(days=1)
+    with Session(engine) as session:
+        succ = session.query(Signal).filter(Signal.hit == "SUCCESS", Signal.hit_timestamp > cutoff).count()
+        fail = session.query(Signal).filter(Signal.hit == "FAILURE", Signal.hit_timestamp > cutoff).count()
+
+    summary = f"Last 24h: {succ} ✅, {fail} ❌"
+    logger.info(f"Daily summary: {summary}")
+    return summary
