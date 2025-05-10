@@ -3,29 +3,35 @@ services:
     image: postgres:17
     container_name: signal_db
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD:
       POSTGRES_DB: signaldb
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - my-network
+    restart: always
 
   pgadmin:
     image: dpage/pgadmin4
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@example.com
-      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_DEFAULT_EMAIL: @gmail.com
+      PGADMIN_DEFAULT_PASSWORD:
     ports:
       - "5050:80"
+    networks:
+      - my-network
+    restart: always
 
   app:
     build: .
     depends_on:
       - postgres
     environment:
-      - TELEGRAM_TOKEN=xxx
-      - TELEGRAM_CHAT_ID=xxx
+      - TELEGRAM_TOKEN=
+      - TELEGRAM_CHAT_ID=
       - DB_ENABLED=true
-      - DB_USER=user
+      - DB_USER=root
       - DB_PASSWORD=password
       - DB_NAME=signaldb
       - DB_HOST=postgres
@@ -33,6 +39,9 @@ services:
       - PAIRS=BTC/USDT,ETH/USDT,SUI/USDT,DOGE/USDT,ADA/USDT,XRP/USDT
       - TIMEFRAMES=15m,1h
       - USE_HIGHER_TF_CONFIRM=false
+    networks:
+      - my-network
+    restart: always
 
 volumes:
   pgdata:
