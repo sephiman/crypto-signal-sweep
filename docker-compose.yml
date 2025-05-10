@@ -34,7 +34,7 @@ services:
       - DB_USER=root
       - DB_PASSWORD=password
       - DB_NAME=signaldb
-      - DB_HOST=postgres
+      - DB_HOST=signal_db
       - DB_PORT=5432
       - PAIRS=BTC/USDT,ETH/USDT,SUI/USDT,DOGE/USDT,ADA/USDT,XRP/USDT
       - TIMEFRAMES=15m,1h
