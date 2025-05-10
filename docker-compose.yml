@@ -13,6 +13,7 @@ services:
     restart: always
 
   pgadmin:
+    container_name: pgadmin
     image: dpage/pgadmin4
     environment:
       PGADMIN_DEFAULT_EMAIL: @gmail.com
@@ -24,6 +25,7 @@ services:
     restart: always
 
   app:
+    container_name: crypto_signal_sweep
     build: .
     depends_on:
       - postgres
@@ -32,7 +34,7 @@ services:
       - TELEGRAM_CHAT_ID=
       - DB_ENABLED=true
       - DB_USER=root
-      - DB_PASSWORD=password
+      - DB_PASSWORD=
       - DB_NAME=signaldb
       - DB_HOST=signal_db
       - DB_PORT=5432
