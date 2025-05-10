@@ -59,7 +59,7 @@ def check_hit_signals():
         return []
 
     updated = []
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.UTC)
 
     with Session(engine) as session:
         # 1) load all pending signals
