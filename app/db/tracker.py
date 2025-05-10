@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 from typing import Dict
 
+import ccxt
 import numpy as np
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -16,6 +17,8 @@ engine = None
 if DB_ENABLED:
     engine = create_engine(DB_URL, echo=False, future=True)
     Base.metadata.create_all(engine)
+
+exchange = ccxt.binance()
 
 
 def _to_native(obj):
@@ -48,31 +51,65 @@ def save_signal(signal: Dict):
 
 
 def check_hit_signals():
-    """Scan pending signals; mark SUCCESS/FAILURE when SL/TP hit."""
+    """
+    Scan all PENDING signals, fetch each pair's last price exactly once,
+    mark those that have hit SL/TP, and return the ones we just flipped.
+    """
     if not DB_ENABLED:
-        return
-    import ccxt  # local import to avoid startup cost
-    exchange = ccxt.binance()
+        return []
+
+    updated = []
+    now = datetime.datetime.utcnow()
 
     with Session(engine) as session:
+        # 1) load all pending signals
         pending = session.query(Signal).filter_by(hit="PENDING").all()
+        if not pending:
+            return []
+
+        # 2) build a unique list of pairs, fetch each price once
+        pairs = {s.pair for s in pending}
+        prices = {}
+        for pair in pairs:
+            try:
+                prices[pair] = exchange.fetch_ticker(pair)["last"]
+            except Exception as e:
+                logger.error(f"Failed to fetch price for {pair}: {e}")
+                prices[pair] = None
+
+        # 3) iterate signals and compare against our one‐time fetch
         for s in pending:
-            ticker = exchange.fetch_ticker(s.pair)
-            current = float(ticker["last"])
+            current = prices.get(s.pair)
+            if current is None:
+                continue
+
+            new_hit = None
             if s.side == "LONG":
                 if current >= s.take_profit:
-                    s.hit = "SUCCESS"
+                    new_hit = "SUCCESS"
                 elif current <= s.stop_loss:
-                    s.hit = "FAILURE"
-            elif s.side == "SHORT":
+                    new_hit = "FAILURE"
+            else:  # SHORT
                 if current <= s.take_profit:
-                    s.hit = "SUCCESS"
+                    new_hit = "SUCCESS"
                 elif current >= s.stop_loss:
-                    s.hit = "FAILURE"
-            if s.hit != "PENDING":
-                s.hit_timestamp = datetime.utcnow()
-                logger.info(f"Signal {s.id} {s.side} → {s.hit} at {current:.4f}")
+                    new_hit = "FAILURE"
+
+            if new_hit:
+                s.hit = new_hit
+                s.hit_timestamp = now
+                updated.append({
+                    "pair": s.pair,
+                    "timeframe": s.timeframe,
+                    "side": s.side,
+                    "price": current,
+                    "hit": new_hit,
+                    "hit_timestamp": now,
+                })
+
         session.commit()
+
+    return updated
 
 
 def summarize_and_notify():
@@ -82,7 +119,7 @@ def summarize_and_notify():
 
     from datetime import timedelta
 
-    cutoff = datetime.utcnow() - timedelta(days=1)
+    cutoff = datetime.datetime.now(datetime.UTC) - timedelta(days=1)
     with Session(engine) as session:
         succ = session.query(Signal).filter(Signal.hit == "SUCCESS", Signal.hit_timestamp > cutoff).count()
         fail = session.query(Signal).filter(Signal.hit == "FAILURE", Signal.hit_timestamp > cutoff).count()

@@ -13,7 +13,10 @@ def run_analysis_job(timeframe):
 
 
 def run_midnight_summary_job():
-    check_hit_signals()
     summary = summarize_and_notify()
     if summary:
         send_alerts([{"side": "SUMMARY", "summary": summary}])
+
+
+def run_hit_polling_job():
+    check_hit_signals()
