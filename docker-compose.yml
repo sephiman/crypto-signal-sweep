@@ -22,8 +22,6 @@ services:
     depends_on:
       - postgres
     environment:
-      - BINANCE_API_KEY=public
-      - BINANCE_API_SECRET=not_needed
       - TELEGRAM_TOKEN=xxx
       - TELEGRAM_CHAT_ID=xxx
       - DB_ENABLED=true
@@ -32,7 +30,7 @@ services:
       - DB_NAME=signaldb
       - DB_HOST=postgres
       - DB_PORT=5432
-      - PAIRS=BTC/USDT,ETH/USDT
+      - PAIRS=BTC/USDT,ETH/USDT,SUI/USDT,DOGE/USDT,ADA/USDT,XRP/USDT
       - TIMEFRAMES=15m,1h
       - USE_HIGHER_TF_CONFIRM=false
 
