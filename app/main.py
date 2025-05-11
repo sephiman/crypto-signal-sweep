@@ -1,8 +1,10 @@
 import logging
 
 from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 from app.config import TIMEFRAMES
+from app.config import tf_to_minutes
 from app.jobs import run_analysis_job, run_midnight_summary_job, run_hit_polling_job
 
 logging.basicConfig(
@@ -12,16 +14,36 @@ logging.basicConfig(
 
 scheduler = BlockingScheduler()
 
+# Schedule analysis jobs at the end of each closed candle + 5s buffer
 for tf in TIMEFRAMES:
-    minutes = int(tf[:-1]) if tf.endswith("m") else int(tf[:-1]) * 60
-    scheduler.add_job(lambda tf=tf: run_analysis_job(tf), 'interval', minutes=minutes, id=f"run_analysis_{tf}")
-    run_analysis_job(tf)
+    minutes = tf_to_minutes(tf)
+    if tf.endswith("m"):
+        # every N minutes at second=5
+        trigger = CronTrigger(minute=f"*/{minutes}", second="5")
+    else:
+        hours = minutes // 60
+        trigger = CronTrigger(hour=f"*/{hours}", minute="0", second="5")
 
-scheduler.add_job(run_hit_polling_job,
-                  "interval", minutes=1,
-                  id="run_hit_polling")
+    scheduler.add_job(
+        lambda tf=tf: run_analysis_job(tf),
+        trigger,
+        id=f"run_analysis_{tf}"
+    )
 
-scheduler.add_job(run_midnight_summary_job, 'cron', hour=0, minute=0, id="run_midnight_summary")
+# Poll for SL/TP hits once per minute (no need to align to candles)
+scheduler.add_job(
+    run_hit_polling_job,
+    "interval",
+    minutes=1,
+    id="run_hit_polling"
+)
+
+# Daily summary at UTC midnight + 10s buffer
+scheduler.add_job(
+    run_midnight_summary_job,
+    trigger=CronTrigger(hour=0, minute=0, second="10"),
+    id="run_midnight_summary"
+)
 
 if __name__ == "__main__":
     scheduler.start()

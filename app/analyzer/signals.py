@@ -22,7 +22,7 @@ exchange = ccxt.binance()
 
 def analyze_market(pairs, timeframe):
     """
-    Analyze market for given pairs and timeframe, applying RSI, MACD, EMA, ATR,
+    Analyze the market for given pairs and timeframe, applying RSI, MACD, EMA, ATR,
     plus optional trend filter and higher-timeframe confirmation.
     """
     # Fetch main timeframe data
@@ -31,7 +31,6 @@ def analyze_market(pairs, timeframe):
 
     for pair in pairs:
         data = df[pair]
-        price = data['close'].iloc[-1]
 
         # Primary timeframe indicators
         rsi = RSIIndicator(data['close'], window=RSI_PERIOD).rsi().iloc[-1]
@@ -45,6 +44,8 @@ def analyze_market(pairs, timeframe):
         signal_line = macd_obj.macd_signal().iloc[-1]
         ema_fast = data['close'].ewm(span=EMA_FAST).mean().iloc[-1]
         ema_slow = data['close'].ewm(span=EMA_SLOW).mean().iloc[-1]
+
+        price = _get_last_price(pair)
 
         # Trend filter
         if USE_TREND_FILTER:
@@ -76,14 +77,8 @@ def analyze_market(pairs, timeframe):
         else:
             confirm_long = confirm_short = True
 
-        # Determine side
-        side = "NONE"
-        if (rsi < RSI_OVERSOLD and macd > signal_line
-                and ema_fast > ema_slow and trend_ok_long and confirm_long):
-            side = "LONG"
-        elif (rsi > RSI_OVERSOLD and macd < signal_line
-              and ema_fast < ema_slow and trend_ok_short and confirm_short):
-            side = "SHORT"
+        side = _determine_side(confirm_long, confirm_short, ema_fast, ema_slow, macd, rsi, signal_line, trend_ok_long,
+                               trend_ok_short)
 
         # ATR-based SL/TP
         atr = AverageTrueRange(
@@ -119,14 +114,36 @@ def analyze_market(pairs, timeframe):
     return signals
 
 
+def _determine_side(confirm_long, confirm_short, ema_fast, ema_slow, macd, rsi, signal_line, trend_ok_long,
+                    trend_ok_short):
+    side = "NONE"
+    if (rsi < RSI_OVERSOLD and macd > signal_line
+            and ema_fast > ema_slow and trend_ok_long and confirm_long):
+        side = "LONG"
+    elif (rsi > RSI_OVERSOLD and macd < signal_line
+          and ema_fast < ema_slow and trend_ok_short and confirm_short):
+        side = "SHORT"
+    return side
+
+
+def _get_last_price(pair):
+    ticker = exchange.fetch_ticker(pair)
+    price = float(ticker["last"])
+    return price
+
+
 def _fetch_ohlcv_df(pairs, timeframe):
     """
-    Fetches OHLCV for each pair and returns a dict of DataFrames.
+    Fetches OHLCV for each pair, drops the _incomplete_ bar,
+    and returns a dict of DataFrames of only closed candles.
     """
     result = {}
     for pair in pairs:
         candles = exchange.fetch_ohlcv(pair, timeframe)
         df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        # drop the in‐flight candle
+        if len(df) > 1:
+            df = df.iloc[:-1]
         result[pair] = df
     return result
