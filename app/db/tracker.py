@@ -120,34 +120,33 @@ def summarize_and_notify():
     if not DB_ENABLED:
         return None
 
+    now = datetime.datetime.now(datetime.UTC)
     periods = [
         ("24h", datetime.timedelta(days=1)),
         ("7d", datetime.timedelta(days=7)),
         ("30d", datetime.timedelta(days=30)),
     ]
-    now = datetime.datetime.utcnow()
-    parts = []
-
+    lines = ["📊 *Daily Summary*"]
     with Session(engine) as session:
         for label, delta in periods:
             cutoff = now - delta
-            total = session.query(Signal).filter(
-                Signal.hit_timestamp != None,
-                Signal.hit_timestamp > cutoff
-            ).count()
-            succ = session.query(Signal).filter(
-                Signal.hit == "SUCCESS",
-                Signal.hit_timestamp > cutoff
-            ).count()
-            fail = session.query(Signal).filter(
-                Signal.hit == "FAILURE",
-                Signal.hit_timestamp > cutoff
-            ).count()
+            total = session.query(Signal) \
+                .filter(Signal.hit_timestamp != None,
+                        Signal.hit_timestamp > cutoff) \
+                .count()
+            succ = session.query(Signal) \
+                .filter(Signal.hit == "SUCCESS",
+                        Signal.hit_timestamp > cutoff) \
+                .count()
+            fail = session.query(Signal) \
+                .filter(Signal.hit == "FAILURE",
+                        Signal.hit_timestamp > cutoff) \
+                .count()
             pct = (succ / total * 100) if total else 0.0
-            parts.append(f"{label}: {succ}✅/{fail}❌ ({pct:.1f}% success)")
+            lines.append(f"{label}: {succ}✅/{fail}❌ ({pct:.1f}% success)")
 
-    summary = " | ".join(parts)
-    logger.info(f"Daily summary: {summary}")
+    summary = "\n".join(lines)
+    logger.info(f"Daily summary:\n{summary}")
     return summary
 
 
