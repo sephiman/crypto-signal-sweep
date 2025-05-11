@@ -1,19 +1,20 @@
-import datetime
 import logging
 from datetime import timedelta
 from typing import Dict
 
 import ccxt
 import numpy as np
-from sqlalchemy import create_engine, false
+from sqlalchemy import create_engine
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
 
-from app.config import DB_URL, DB_ENABLED
-from app.db.models import Base, Signal
+from app.db.models import Base
 
 logger = logging.getLogger(__name__)
+import datetime
+from sqlalchemy.orm import Session
+from app.config import DB_ENABLED, DB_URL
+from app.db.models import Signal
 
 engine = None
 if DB_ENABLED:
@@ -115,18 +116,37 @@ def check_hit_signals():
 
 
 def summarize_and_notify():
-    """Return a 24h summary string for Telegram (or None if DB disabled)."""
+    """Return a summary string for Telegram with counts and % success over 24h, 7d, and 30d."""
     if not DB_ENABLED:
         return None
 
-    from datetime import timedelta
+    periods = [
+        ("24h", datetime.timedelta(days=1)),
+        ("7d", datetime.timedelta(days=7)),
+        ("30d", datetime.timedelta(days=30)),
+    ]
+    now = datetime.datetime.utcnow()
+    parts = []
 
-    cutoff = datetime.datetime.now(datetime.UTC) - timedelta(days=1)
     with Session(engine) as session:
-        succ = session.query(Signal).filter(Signal.hit == "SUCCESS", Signal.hit_timestamp > cutoff).count()
-        fail = session.query(Signal).filter(Signal.hit == "FAILURE", Signal.hit_timestamp > cutoff).count()
+        for label, delta in periods:
+            cutoff = now - delta
+            total = session.query(Signal).filter(
+                Signal.hit_timestamp != None,
+                Signal.hit_timestamp > cutoff
+            ).count()
+            succ = session.query(Signal).filter(
+                Signal.hit == "SUCCESS",
+                Signal.hit_timestamp > cutoff
+            ).count()
+            fail = session.query(Signal).filter(
+                Signal.hit == "FAILURE",
+                Signal.hit_timestamp > cutoff
+            ).count()
+            pct = (succ / total * 100) if total else 0.0
+            parts.append(f"{label}: {succ}✅/{fail}❌ ({pct:.1f}% success)")
 
-    summary = f"Last 24h: {succ} ✅, {fail} ❌"
+    summary = " | ".join(parts)
     logger.info(f"Daily summary: {summary}")
     return summary
 
