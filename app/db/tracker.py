@@ -1,10 +1,12 @@
-import logging
 import datetime
+import logging
+from datetime import timedelta
 from typing import Dict
 
 import ccxt
 import numpy as np
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, false
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -127,3 +129,26 @@ def summarize_and_notify():
     summary = f"Last 24h: {succ} ✅, {fail} ❌"
     logger.info(f"Daily summary: {summary}")
     return summary
+
+
+def has_recent_pending(pair: str, timeframe: str, cooldown_minutes: int, session) -> bool:
+    """
+    Returns True if there is any PENDING signal for (pair, timeframe)
+    in the last `cooldown_minutes` minutes.
+    """
+
+    if not DB_ENABLED:
+        return False
+
+    cutoff = datetime.datetime.now(datetime.UTC) - timedelta(minutes=cooldown_minutes)
+    q = (
+        select(Signal.id)
+        .where(
+            Signal.pair == pair,
+            Signal.timeframe == timeframe,
+            Signal.hit == "PENDING",
+            Signal.timestamp >= cutoff,
+        )
+        .limit(1)
+    )
+    return session.execute(q).first() is not None
