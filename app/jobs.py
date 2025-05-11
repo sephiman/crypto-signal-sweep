@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def run_analysis_job(timeframe):
     signals = analyze_market(PAIRS, timeframe)
 
-    cooldown_mins = tf_to_minutes(timeframe) * 2
+    cooldown_mins = tf_to_minutes(timeframe) * 2 + 1
 
     with Session(engine) as session:
         to_alert = []
