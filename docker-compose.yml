@@ -16,13 +16,15 @@ services:
     container_name: pgadmin
     image: dpage/pgadmin4
     environment:
-      PGADMIN_DEFAULT_EMAIL: @gmail.com
+      PGADMIN_DEFAULT_EMAIL: admin@local
       PGADMIN_DEFAULT_PASSWORD:
     ports:
       - "5050:80"
     networks:
       - my-network
     restart: always
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
 
   app:
     container_name: crypto_signal_sweep
@@ -40,13 +42,15 @@ services:
       - DB_PORT=5432
       - PAIRS=BTC/USDT,ETH/USDT,SUI/USDT,DOGE/USDT,ADA/USDT,XRP/USDT
       - TIMEFRAMES=15m,1h
-      - USE_HIGHER_TF_CONFIRM=false
+      - USE_HIGHER_TF_CONFIRM=true
+      - USE_TREND_FILTER=true
     networks:
       - my-network
     restart: always
 
 volumes:
   pgdata:
+  pgadmin_data:
 
 networks:
   my-network:
