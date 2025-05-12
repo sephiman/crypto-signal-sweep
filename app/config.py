@@ -7,12 +7,15 @@ USE_HIGHER_TF_CONFIRM = os.getenv("USE_HIGHER_TF_CONFIRM", "false").lower() == "
 HIGHER_TF = os.getenv("HIGHER_TF", "1h")
 USE_TREND_FILTER = os.getenv("USE_TREND_FILTER", "false").lower() == "true"
 TREND_MA_PERIOD = int(os.getenv("TREND_MA_PERIOD", 21))
+REQUIRED_MA_BARS = int(os.getenv("REQUIRED_MA_BARS", 2))
 
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", 14))
 RSI_OVERSOLD = float(os.getenv("RSI_OVERSOLD", 30))
+RSI_OVERBOUGHT = float(os.getenv("RSI_OVERBOUGHT", 70))
 MACD_FAST = int(os.getenv("MACD_FAST", 12))
 MACD_SLOW = int(os.getenv("MACD_SLOW", 26))
 MACD_SIGNAL = int(os.getenv("MACD_SIGNAL", 9))
+MACD_MIN_DIFF = float(os.getenv("MACD_MIN_DIFF", 0.0))
 EMA_FAST = int(os.getenv("EMA_FAST", 9))
 EMA_SLOW = int(os.getenv("EMA_SLOW", 21))
 SL_MULTIPLIER = float(os.getenv("SL_MULTIPLIER", 1.5))
