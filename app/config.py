@@ -51,11 +51,12 @@ def tf_to_minutes(tf: str) -> int:
     v, u = int(m.group(1)), m.group(2)
     return v * (60 if u == "h" else 1)
 
-
-def build_higher_tf_map(tfs):
-    tfs_sorted = sorted(tfs, key=tf_to_minutes)
-    return {tf: (tfs_sorted[i + 1] if i + 1 < len(tfs_sorted) else None)
-            for i, tf in enumerate(tfs_sorted)}
-
-
-HIGHER_TF_MAP = build_higher_tf_map(TIMEFRAMES)
+HIGHER_TF_MAP = {
+    "1m":  ["5m"],
+    "5m":  ["15m"],
+    "15m": ["1h"],
+    "1h":  ["4h"],
+    "4h":  ["1d"],
+    "1d":  ["1w"],
+    "1w":  []
+}
