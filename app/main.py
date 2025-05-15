@@ -3,7 +3,7 @@ import logging
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.config import TIMEFRAMES
+from app.config import TIMEFRAMES, RUN_AT_START
 from app.config import tf_to_minutes
 from app.jobs import run_analysis_job, run_midnight_summary_job, run_hit_polling_job
 
@@ -29,6 +29,8 @@ for tf in TIMEFRAMES:
         trigger,
         id=f"run_analysis_{tf}"
     )
+    if RUN_AT_START:
+        run_analysis_job(tf)
 
 # Poll for SL/TP hits once per minute (no need to align to candles)
 scheduler.add_job(

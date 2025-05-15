@@ -3,6 +3,7 @@ import re
 
 PAIRS = os.getenv("PAIRS", "BTC/USDT").split(",")
 TIMEFRAMES = os.getenv("TIMEFRAMES", "15m").split(",")
+RUN_AT_START = os.getenv("RUN_AT_START", "false").lower() == "true"
 USE_HIGHER_TF_CONFIRM = os.getenv("USE_HIGHER_TF_CONFIRM", "false").lower() == "true"
 HIGHER_TF = os.getenv("HIGHER_TF", "1h")
 USE_TREND_FILTER = os.getenv("USE_TREND_FILTER", "false").lower() == "true"
