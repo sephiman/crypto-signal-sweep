@@ -30,7 +30,8 @@ def send_alerts(signals):
                 f"\n*Price:* {s['price']:.4f}"
                 f"\n*SL:* {s['stop_loss']:.4f}"
                 f"\n*TP:* {s['take_profit']:.4f}"
-                f"\n*Time:* {s['timestamp']:%Y-%m-%d %H:%M:%S} UTC\n"
+                f"\n*Time:* {s['timestamp']:%Y-%m-%d %H:%M:%S} UTC"
+                f"\n*Momentum OK:* {s['momentum_ok']} | *Trend Confirmed:* {s['trend_confirmed']} | *HTF Confirmed:* {s['higher_tf_confirmed']} | *Unconfirmed:* {s['unconfirmed']}\n"
             )
         text = "\n".join(lines)
 
