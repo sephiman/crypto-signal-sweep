@@ -67,17 +67,11 @@ def analyze_market(pairs, timeframe):
         )
         macd = macd_obj.macd().iloc[-1]
         signal_line = macd_obj.macd_signal().iloc[-1]
-        # detect cross on the last closed bar
-        prev_macd = macd_obj.macd().iloc[-2]
-        prev_signal = macd_obj.macd_signal().iloc[-2]
-        prev_diff = prev_macd - prev_signal
 
+        # The cross of signals may have happened before
         diff = macd - signal_line
-        cross_up = diff > 0 >= prev_diff
-        cross_down = diff < 0 <= prev_diff
-
-        momentum_ok_long = cross_up and diff >= MACD_MIN_DIFF
-        momentum_ok_short = cross_down and diff <= -MACD_MIN_DIFF
+        momentum_ok_long = (macd > signal_line) and (diff >= MACD_MIN_DIFF)
+        momentum_ok_short = (macd < signal_line) and (diff <= -MACD_MIN_DIFF)
 
         ema_fast = data['close'].ewm(span=EMA_FAST).mean().iloc[-1]
         ema_slow = data['close'].ewm(span=EMA_SLOW).mean().iloc[-1]
