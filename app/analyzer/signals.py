@@ -14,7 +14,7 @@ from app.config import (
     MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF,
     EMA_FAST, EMA_SLOW,
     ATR_PERIOD, ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER,
-    SEND_UNCONFIRMED, ADX_PERIOD, ADX_THRESHOLD, RSI_MOMENTUM, EMA_MIN_DIFF
+    SEND_UNCONFIRMED, ADX_PERIOD, ADX_THRESHOLD, RSI_MOMENTUM, EMA_MIN_DIFF, ADX_RSI_MODE
 )
 
 logger = logging.getLogger(__name__)
@@ -84,17 +84,21 @@ def analyze_market(pairs, timeframe):
         adx = ADXIndicator(
             high=data['high'], low=data['low'], close=data['close'], window=ADX_PERIOD
         ).adx().iloc[-1]
-        is_trending = adx >= ADX_THRESHOLD
-
-        # Regime‐aware RSI gates
-        if is_trending:
-            # momentum breakout regime
-            rsi_ok_long = rsi > RSI_MOMENTUM
-            rsi_ok_short = rsi < RSI_MOMENTUM
-        else:
-            # range/mean‐reversion regime
+        if ADX_RSI_MODE == "rsi":
             rsi_ok_long = rsi < RSI_OVERSOLD
             rsi_ok_short = rsi > RSI_OVERBOUGHT
+        else:
+            is_trending = adx >= ADX_THRESHOLD
+
+            # Regime‐aware RSI gates
+            if is_trending:
+                # momentum breakout regime
+                rsi_ok_long = rsi > RSI_MOMENTUM
+                rsi_ok_short = rsi < RSI_MOMENTUM
+            else:
+                # range/mean‐reversion regime
+                rsi_ok_long = rsi < RSI_OVERSOLD
+                rsi_ok_short = rsi > RSI_OVERBOUGHT
 
         # 3) Optional SMA trend filter
         if USE_TREND_FILTER:
