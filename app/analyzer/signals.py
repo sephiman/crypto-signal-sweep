@@ -14,7 +14,8 @@ from app.config import (
     MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF,
     EMA_FAST, EMA_SLOW,
     ATR_PERIOD, ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER,
-    SEND_UNCONFIRMED, ADX_PERIOD, ADX_THRESHOLD, RSI_MOMENTUM, EMA_MIN_DIFF, ADX_RSI_MODE
+    SEND_UNCONFIRMED, ADX_PERIOD, ADX_THRESHOLD, RSI_MOMENTUM, EMA_MIN_DIFF, ADX_RSI_MODE, MACD_MIN_DIFF_ENABLED,
+    EMA_MIN_DIFF_ENABLED
 )
 
 logger = logging.getLogger(__name__)
@@ -70,14 +71,23 @@ def analyze_market(pairs, timeframe):
 
         # The cross of signals may have happened before
         diff = macd - signal_line
-        momentum_ok_long = (macd > signal_line) and (diff >= MACD_MIN_DIFF)
-        momentum_ok_short = (macd < signal_line) and (diff <= -MACD_MIN_DIFF)
+
+        if MACD_MIN_DIFF_ENABLED:
+            momentum_ok_long = (macd > signal_line) and (diff >= MACD_MIN_DIFF)
+            momentum_ok_short = (macd < signal_line) and (diff <= -MACD_MIN_DIFF)
+        else:
+            momentum_ok_long = macd > signal_line
+            momentum_ok_short = macd < signal_line
 
         ema_fast = data['close'].ewm(span=EMA_FAST).mean().iloc[-1]
         ema_slow = data['close'].ewm(span=EMA_SLOW).mean().iloc[-1]
 
-        ema_ok_long = (ema_fast - ema_slow) >= EMA_MIN_DIFF
-        ema_ok_short = (ema_slow - ema_fast) >= EMA_MIN_DIFF
+        if EMA_MIN_DIFF_ENABLED:
+            ema_ok_long = (ema_fast - ema_slow) >= EMA_MIN_DIFF
+            ema_ok_short = (ema_slow - ema_fast) >= EMA_MIN_DIFF
+        else:
+            ema_ok_long = ema_fast > ema_slow
+            ema_ok_short = ema_fast < ema_slow
 
         # 2) ADX‐based regime switch
         from ta.trend import ADXIndicator

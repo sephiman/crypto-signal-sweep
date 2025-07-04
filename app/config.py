@@ -22,9 +22,11 @@ MACD_FAST = int(os.getenv("MACD_FAST", 12))
 MACD_SLOW = int(os.getenv("MACD_SLOW", 26))
 MACD_SIGNAL = int(os.getenv("MACD_SIGNAL", 9))
 MACD_MIN_DIFF = float(os.getenv("MACD_MIN_DIFF", 0.001))
+MACD_MIN_DIFF_ENABLED = os.getenv("MACD_MIN_DIFF_ENABLED", "false").lower() == "true"
 EMA_FAST = int(os.getenv("EMA_FAST", 9))
 EMA_SLOW = int(os.getenv("EMA_SLOW", 21))
 EMA_MIN_DIFF = int(os.getenv("EMA_MIN_DIFF", 0.01))
+EMA_MIN_DIFF_ENABLED = os.getenv("EMA_MIN_DIFF_ENABLED", "false").lower() == "true"
 SL_MULTIPLIER = float(os.getenv("SL_MULTIPLIER", 1.5))
 TP_MULTIPLIER = float(os.getenv("TP_MULTIPLIER", 3.0))
 
