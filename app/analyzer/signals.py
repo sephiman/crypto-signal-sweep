@@ -15,7 +15,7 @@ from app.config import (
     EMA_FAST, EMA_SLOW,
     ATR_PERIOD, ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER,
     SEND_UNCONFIRMED, ADX_PERIOD, ADX_THRESHOLD, RSI_MOMENTUM, EMA_MIN_DIFF, ADX_RSI_MODE, MACD_MIN_DIFF_ENABLED,
-    EMA_MIN_DIFF_ENABLED
+    EMA_MIN_DIFF_ENABLED, DYNAMIC_SCORE_ENABLED, MIN_SCORE_RANGING, MIN_SCORE_DEFAULT, MIN_ATR_RATIO
 )
 
 logger = logging.getLogger(__name__)
@@ -142,32 +142,45 @@ def analyze_market(pairs, timeframe):
             confirm_long = confirm_short = True
 
         # 5) Decide side (now passing in rsi_ok flags)
-        side = _determine_side(
-            rsi_ok_long, rsi_ok_short,
-            confirm_long, confirm_short,
-            ema_ok_long, ema_ok_short,
-            macd, signal_line,
-            trend_ok_long, trend_ok_short,
-            momentum_ok_long, momentum_ok_short
-        )
+        long_score = sum([
+            rsi_ok_long,
+            macd > signal_line,
+            momentum_ok_long,
+            ema_ok_long,
+            SEND_UNCONFIRMED or (trend_ok_long and confirm_long)
+        ])
+
+        short_score = sum([
+            rsi_ok_short,
+            macd < signal_line,
+            momentum_ok_short,
+            ema_ok_short,
+            SEND_UNCONFIRMED or (trend_ok_short and confirm_short)
+        ])
+
+        min_score = _dynamic_min_score(adx)
+        side = "LONG" if long_score >= min_score else "SHORT" if short_score >= min_score else "NONE"
 
         # 6) ATR‐based SL/TP
         atr = AverageTrueRange(
             high=data['high'], low=data['low'], close=data['close'], window=ATR_PERIOD
         ).average_true_range().iloc[-1]
+        # ATR-based minimum volatility filter
+        if (atr / price) < MIN_ATR_RATIO:
+            logger.info(
+                f"{timeframe} | {pair} | Skipped: ATR too low ({atr:.6f} < {MIN_ATR_RATIO:.4%} of price={price:.6f})")
+            continue
 
         if side != "NONE":
             sl = price - atr * ATR_SL_MULTIPLIER if side == "LONG" else price + atr * ATR_SL_MULTIPLIER
             tp = price + atr * ATR_TP_MULTIPLIER if side == "LONG" else price - atr * ATR_TP_MULTIPLIER
 
             logger.info(
-                f"{timeframe} | {pair} | side={side} | "
-                f"RSI={rsi:.2f} | MACD={macd:.2f}/{signal_line:.2f} (Δ={diff:.2f}) | "
-                f"EMA={ema_fast:.2f}/{ema_slow:.2f} | ADX={adx:.2f} | price={price:.2f} | "
-                f"ATR={atr:.2f} | SL={sl:.2f} | TP={tp:.2f} | "
-                f"momentum_ok={momentum_ok_long if side == 'LONG' else momentum_ok_short} | "
-                f"trend_ok={trend_ok_long if side == 'LONG' else trend_ok_short} | "
-                f"higher_tf_ok={confirm_long if side == 'LONG' else confirm_short}"
+                f"{timeframe} | {pair} | side={side} | price={price:.2f}\n"
+                f"  RSI: {rsi:.2f} | ADX: {adx:.2f} | MACD: {macd:.2f}/{signal_line:.2f} (Δ={diff:.2f}) | EMA: {ema_fast:.2f}/{ema_slow:.2f}\n"
+                f"  LONG gates: rsi_ok={rsi_ok_long}, ema_ok={ema_ok_long}, momentum_ok={momentum_ok_long}, trend_ok={trend_ok_long}, ht_ok={confirm_long} [score={long_score}/5]\n"
+                f"  SHORT gates: rsi_ok={rsi_ok_short}, ema_ok={ema_ok_short}, momentum_ok={momentum_ok_short}, trend_ok={trend_ok_short}, ht_ok={confirm_short} [score={short_score}/5]\n"
+                f"  Final decision: side={side} (SEND_UNCONFIRMED={SEND_UNCONFIRMED}, min_score={min_score})"
             )
 
             signals.append({
@@ -182,59 +195,25 @@ def analyze_market(pairs, timeframe):
                 "trend_confirmed": trend_ok_long if side == "LONG" else trend_ok_short,
                 "higher_tf_confirmed": confirm_long if side == "LONG" else confirm_short,
                 "unconfirmed": (not ((trend_ok_long if side == "LONG" else trend_ok_short) and (
-                    confirm_long if side == "LONG" else confirm_short)))
+                    confirm_long if side == "LONG" else confirm_short))),
+                "score": long_score if side == "LONG" else short_score,
+                "required_score": min_score
             })
         else:
+            score = max(long_score, short_score)
+            likely_side = "LONG" if long_score >= short_score else "SHORT"
+
             logger.info(
-                f"{timeframe} | {pair} | side={side} | "
-                f"RSI={rsi:.2f} | MACD={macd:.2f}/{signal_line:.2f} | ADX={adx:.2f} | "
-                f"EMA={ema_fast:.2f}/{ema_slow:.2f} | price={price:.2f} | "
-                f"momentum_ok(L/S)={momentum_ok_long}/{momentum_ok_short} | "
-                f"trend_ok(L/S)={trend_ok_long}/{trend_ok_short} | "
-                f"higher_tf_ok(L/S)={confirm_long}/{confirm_short}"
+                f"{timeframe} | {pair} | side=NONE | score={score}/5 | min_required={min_score} | "
+                f"RSI={rsi:.2f} | MACD={macd:.2f}/{signal_line:.2f} (Δ={diff:.2f}) | "
+                f"EMA={ema_fast:.2f}/{ema_slow:.2f} | ADX={adx:.2f} | price={price:.2f} | "
+                f"momentum_ok={momentum_ok_long if likely_side == 'LONG' else momentum_ok_short} | "
+                f"trend_ok={trend_ok_long if likely_side == 'LONG' else trend_ok_short} | "
+                f"higher_tf_ok={confirm_long if likely_side == 'LONG' else confirm_short} | "
+                f"ATR={atr:.6f} ({(atr / price):.4%} of price)"
             )
 
     return signals
-
-
-def _determine_side(
-        rsi_ok_long, rsi_ok_short,
-        confirm_long, confirm_short,
-        ema_ok_long, ema_ok_short,
-        macd, signal_line,
-        trend_ok_long, trend_ok_short,
-        momentum_ok_long, momentum_ok_short
-):
-    """
-    Decide LONG/SHORT/NONE based on:
-     - Regime-aware RSI gate (rsi_ok_*)
-     - MACD crossover & minimum-diff (momentum_ok_*)
-     - EMA trend (fast vs. slow)
-     - Optional SMA & higher-TF confirmations
-    """
-    # LONG conditions
-    if (
-            rsi_ok_long and  # RSI in the right regime zone
-            macd > signal_line and  # MACD above its signal line
-            momentum_ok_long and  # macd - signal >= MACD_MIN_DIFF
-            ema_ok_long and  # up-trend on EMAs
-            (trend_ok_long and confirm_long  # all confirmations passed
-             or SEND_UNCONFIRMED)  # or send it anyway if unconfirmed
-    ):
-        return "LONG"
-
-    # SHORT conditions
-    if (
-            rsi_ok_short and  # RSI in the right regime zone
-            macd < signal_line and  # MACD below its signal line
-            momentum_ok_short and  # signal - macd >= MACD_MIN_DIFF
-            ema_ok_short and  # down-trend on EMAs
-            (trend_ok_short and confirm_short  # all confirmations passed
-             or SEND_UNCONFIRMED)  # or send anyway if unconfirmed
-    ):
-        return "SHORT"
-
-    return "NONE"
 
 
 def _get_last_price(pair):
@@ -257,3 +236,13 @@ def _fetch_ohlcv_df(pairs, timeframe):
             df = df.iloc[:-1]
         result[pair] = df
     return result
+
+
+def _dynamic_min_score(adx_value: float) -> int:
+    """
+    Decide the min score depending on the ADX value.
+    If DYNAMIC_SCORE_ENABLED is enabled and the market is not in a strong trend, it allows lower score
+    """
+    if DYNAMIC_SCORE_ENABLED:
+        return MIN_SCORE_RANGING if adx_value < ADX_THRESHOLD else MIN_SCORE_DEFAULT
+    return MIN_SCORE_DEFAULT

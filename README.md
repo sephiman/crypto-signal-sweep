@@ -1,19 +1,23 @@
 # CryptoSignalSweep
+🚀 A Dockerized signal-generator for Binance Spot markets.
 
-A Dockerized signal-generator for Binance Spot that:
-* Scans dozens of trading pairs (e.g. BTC/USDT, ETH/USDT, SUI/USDT)
-* Runs on multiple custom intervals (15m, 1h, etc.)
-* Combines RSI, MACD, EMA (and optional trend/Higher-TF filters) to emit LONG & SHORT entry signals
-* Automatically calculates SL/TP via ATR-based sizing (configurable multipliers)
-* Sends real-time alerts to your Telegram chat
-* Logs every signal (and its eventual outcome) to PostgreSQL for backtesting & performance tracking
+Scans multiple pairs and timeframes using RSI, MACD, EMA, ADX and optional filters to emit **LONG/SHORT entry signals** with SL/TP levels. Alerts are pushed to Telegram and stored in PostgreSQL for full backtesting & performance tracking.
 
-## Features
-* Multi-pair via `PAIRS`
-* Multi-timeframe via `TIMEFRAMES`
-* Optional higher timeframe confirmation
-* LONG and SHORT telegram signals
-* Signal tracking in PostgreSQL
+---
+
+## ✅ Features
+- 📈 Multi-pair (`PAIRS`) & multi-timeframe (`TIMEFRAMES`)
+- 🧠 Smart entry logic using:
+  - RSI (regime-aware via ADX)
+  - MACD (momentum + signal cross + histogram diff)
+  - EMA cross with optional minimum separation
+  - Optional: SMA trend filter
+  - Optional: Higher-Timeframe confirmation
+- 🧮 SL/TP sizing via ATR with configurable multipliers
+- 🧠 Signal scoring logic (requires **min N/5 gates**, dynamic via ADX)
+- 📬 Real-time Telegram alerts (LONG / SHORT entries)
+- 🧾 PostgreSQL tracking of all signals & outcomes
+- 🔧 Adaptive ATR filter: skip low-volatility pairs
 
 ## Setup
 1. Prepare docker-compose and fill values.
@@ -21,10 +25,15 @@ A Dockerized signal-generator for Binance Spot that:
 3. `docker-compose up --build`
 
 ## Configuration
-See app/config.py—you can tweak:
-* Signal logic: RSI_PERIOD, RSI_OVERSOLD, MACD_FAST/SLOW/SIGNAL, EMA_FAST/SLOW
-* Stop/Target sizing: ATR_PERIOD, ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER, or legacy SL_MULTIPLIER, TP_MULTIPLIER
-* Pairs / Timeframes: PAIRS, TIMEFRAMES, optional USE_HIGHER_TF_CONFIRM, USE_TREND_FILTER
+All behavior is controlled via app/config.py (or overridden by environment variables):
+
+* Signal Logic: Configure RSI, MACD, EMA periods and thresholds.
+* Scoring System: Adaptive gate score based on ADX (e.g., 4/5 in trending, 3/5 in ranging).
+* Volatility Filter: Minimum ATR relative to price ensures only meaningful signals (e.g., no $0.001 stop on a $100 asset).
+* SL/TP Calculation: Automatically sized using ATR × multipliers.
+* Higher Timeframe Confirmation: Optional MACD+RSI check on higher TF.
+* Trend Filter: Optional SMA filter to only trade in strong trends.
+* Each gate and score is logged and sent to Telegram per signal, along with confirmation status and outcome tracking.
 
 ##  Backtesting & Stats
 

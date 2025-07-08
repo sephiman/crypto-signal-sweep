@@ -20,3 +20,5 @@ class Signal(Base):
     trend_confirmed = Column(Boolean, nullable=False)
     higher_tf_confirmed = Column(Boolean, nullable=False)
     confirmed = Column(Boolean, nullable=False, default=False)
+    score = Column(Integer, nullable=False, default=0)
+    required_score = Column(Integer, nullable=False, default=5)

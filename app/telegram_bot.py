@@ -31,6 +31,7 @@ def send_alerts(signals):
                 f"\n*SL:* {s['stop_loss']:.4f}"
                 f"\n*TP:* {s['take_profit']:.4f}"
                 f"\n*Time:* {s['timestamp']:%Y-%m-%d %H:%M:%S} UTC"
+                f"\n*Score:* {s.get('score', '?')}/{s.get('required_score', 5)}"
                 f"\n*Momentum OK:* {s['momentum_ok']} | *Trend Confirmed:* {s['trend_confirmed']} | *HTF Confirmed:* {s['higher_tf_confirmed']} | *Unconfirmed:* {s['unconfirmed']}\n"
             )
         text = "\n".join(lines)
