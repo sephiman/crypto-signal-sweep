@@ -56,8 +56,8 @@ def save_signal(signal: Dict):
 
 def check_hit_signals():
     """
-    Scan all PENDING signals, fetch each pair's last price exactly once,
-    mark those that have hit SL/TP, and return the ones we just flipped.
+    Scan all PENDING signals, fetch 1-minute candles for each signal from the signal timestamp until now,
+    check if any candle's high/low hit SL or TP, and mark those that triggered.
     """
     if not DB_ENABLED:
         return []
@@ -71,45 +71,43 @@ def check_hit_signals():
         if not pending:
             return []
 
-        # 2) build a unique list of pairs, fetch each price once
-        pairs = {s.pair for s in pending}
-        prices = {}
-        for pair in pairs:
-            try:
-                prices[pair] = exchange.fetch_ticker(pair)["last"]
-            except Exception as e:
-                logger.error(f"Failed to fetch price for {pair}: {e}")
-                prices[pair] = None
-
-        # 3) iterate signals and compare against our one‐time fetch
         for s in pending:
-            current = prices.get(s.pair)
-            if current is None:
-                continue
+            try:
+                since = int(s.timestamp.timestamp() * 1000)
+                ohlcv = exchange.fetch_ohlcv(s.pair, "1m", since=since)
 
-            new_hit = None
-            if s.side == "LONG":
-                if current >= s.take_profit:
-                    new_hit = "SUCCESS"
-                elif current <= s.stop_loss:
-                    new_hit = "FAILURE"
-            else:  # SHORT
-                if current <= s.take_profit:
-                    new_hit = "SUCCESS"
-                elif current >= s.stop_loss:
-                    new_hit = "FAILURE"
+                if not ohlcv:
+                    continue
 
-            if new_hit:
-                s.hit = new_hit
-                s.hit_timestamp = now
-                updated.append({
-                    "pair": s.pair,
-                    "timeframe": s.timeframe,
-                    "side": s.side,
-                    "price": current,
-                    "hit": new_hit,
-                    "hit_timestamp": now,
-                })
+                highs = [c[2] for c in ohlcv]  # high prices
+                lows = [c[3] for c in ohlcv]   # low prices
+
+                new_hit = None
+                if s.side == "LONG":
+                    if max(highs) >= s.take_profit:
+                        new_hit = "SUCCESS"
+                    elif min(lows) <= s.stop_loss:
+                        new_hit = "FAILURE"
+                else:  # SHORT
+                    if min(lows) <= s.take_profit:
+                        new_hit = "SUCCESS"
+                    elif max(highs) >= s.stop_loss:
+                        new_hit = "FAILURE"
+
+                if new_hit:
+                    s.hit = new_hit
+                    s.hit_timestamp = now
+                    updated.append({
+                        "pair": s.pair,
+                        "timeframe": s.timeframe,
+                        "side": s.side,
+                        "price": ohlcv[-1][4],  # last close price
+                        "hit": new_hit,
+                        "hit_timestamp": now,
+                    })
+
+            except Exception as e:
+                logger.error(f"Failed 1m candle check for {s.pair}: {e}")
 
         session.commit()
 
