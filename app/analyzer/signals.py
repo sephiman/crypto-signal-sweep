@@ -147,7 +147,8 @@ def analyze_market(pairs, timeframe):
             macd > signal_line,
             momentum_ok_long,
             ema_ok_long,
-            SEND_UNCONFIRMED or (trend_ok_long and confirm_long)
+            trend_ok_long,
+            confirm_long or SEND_UNCONFIRMED
         ])
 
         short_score = sum([
@@ -155,7 +156,8 @@ def analyze_market(pairs, timeframe):
             macd < signal_line,
             momentum_ok_short,
             ema_ok_short,
-            SEND_UNCONFIRMED or (trend_ok_short and confirm_short)
+            trend_ok_short,
+            confirm_short or SEND_UNCONFIRMED
         ])
 
         min_score = _dynamic_min_score(adx)
@@ -178,8 +180,8 @@ def analyze_market(pairs, timeframe):
             logger.info(
                 f"{timeframe} | {pair} | side={side} | price={price:.2f}\n"
                 f"  RSI: {rsi:.2f} | ADX: {adx:.2f} | MACD: {macd:.2f}/{signal_line:.2f} (Δ={diff:.2f}) | EMA: {ema_fast:.2f}/{ema_slow:.2f}\n"
-                f"  LONG gates: rsi_ok={rsi_ok_long}, ema_ok={ema_ok_long}, momentum_ok={momentum_ok_long}, trend_ok={trend_ok_long}, ht_ok={confirm_long} [score={long_score}/5]\n"
-                f"  SHORT gates: rsi_ok={rsi_ok_short}, ema_ok={ema_ok_short}, momentum_ok={momentum_ok_short}, trend_ok={trend_ok_short}, ht_ok={confirm_short} [score={short_score}/5]\n"
+                f"  LONG gates: rsi_ok={rsi_ok_long}, ema_ok={ema_ok_long}, momentum_ok={momentum_ok_long}, trend_ok={trend_ok_long}, ht_ok={confirm_long} [score={long_score}/6]\n"
+                f"  SHORT gates: rsi_ok={rsi_ok_short}, ema_ok={ema_ok_short}, momentum_ok={momentum_ok_short}, trend_ok={trend_ok_short}, ht_ok={confirm_short} [score={short_score}/6]\n"
                 f"  Final decision: side={side} (SEND_UNCONFIRMED={SEND_UNCONFIRMED}, min_score={min_score})"
             )
 
@@ -204,7 +206,7 @@ def analyze_market(pairs, timeframe):
             likely_side = "LONG" if long_score >= short_score else "SHORT"
 
             logger.info(
-                f"{timeframe} | {pair} | side=NONE | score={score}/5 | min_required={min_score} | "
+                f"{timeframe} | {pair} | side=NONE | score={score}/6 | min_required={min_score} | "
                 f"RSI={rsi:.2f} | MACD={macd:.2f}/{signal_line:.2f} (Δ={diff:.2f}) | "
                 f"EMA={ema_fast:.2f}/{ema_slow:.2f} | ADX={adx:.2f} | price={price:.2f} | "
                 f"momentum_ok={momentum_ok_long if likely_side == 'LONG' else momentum_ok_short} | "
