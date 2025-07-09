@@ -17,22 +17,26 @@ MIN_ATR_RATIO = float(os.getenv("MIN_ATR_RATIO", 0.0025))
 
 ADX_PERIOD = int(os.getenv("ADX_PERIOD", 14))
 ADX_THRESHOLD = int(os.getenv("ADX_THRESHOLD", 20))
+ADX_RSI_MODE = os.getenv("ADX_RSI_MODE", "adx").lower()
+
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", 14))
 RSI_OVERSOLD = float(os.getenv("RSI_OVERSOLD", 35))
 RSI_OVERBOUGHT = float(os.getenv("RSI_OVERBOUGHT", 65))
-ADX_RSI_MODE = os.getenv("ADX_RSI_MODE", "rsi").lower()
-RSI_MOMENTUM = float(os.getenv("RSI_MOMENTUM", 45))
+RSI_MOMENTUM = float(os.getenv("RSI_MOMENTUM", 50))
+
 MACD_FAST = int(os.getenv("MACD_FAST", 12))
 MACD_SLOW = int(os.getenv("MACD_SLOW", 26))
 MACD_SIGNAL = int(os.getenv("MACD_SIGNAL", 9))
-MACD_MIN_DIFF = float(os.getenv("MACD_MIN_DIFF", 0.001))
-MACD_MIN_DIFF_ENABLED = os.getenv("MACD_MIN_DIFF_ENABLED", "false").lower() == "true"
+MACD_MIN_DIFF = float(os.getenv("MACD_MIN_DIFF", 0.002))
+MACD_MIN_DIFF_ENABLED = os.getenv("MACD_MIN_DIFF_ENABLED", "true").lower() == "true"
+
 EMA_FAST = int(os.getenv("EMA_FAST", 9))
 EMA_SLOW = int(os.getenv("EMA_SLOW", 21))
-EMA_MIN_DIFF = int(os.getenv("EMA_MIN_DIFF", 0.01))
-EMA_MIN_DIFF_ENABLED = os.getenv("EMA_MIN_DIFF_ENABLED", "false").lower() == "true"
-SL_MULTIPLIER = float(os.getenv("SL_MULTIPLIER", 1.5))
-TP_MULTIPLIER = float(os.getenv("TP_MULTIPLIER", 3.0))
+EMA_MIN_DIFF = int(os.getenv("EMA_MIN_DIFF", 0.02))
+EMA_MIN_DIFF_ENABLED = os.getenv("EMA_MIN_DIFF_ENABLED", "true").lower() == "true"
+
+SL_MULTIPLIER = float(os.getenv("SL_MULTIPLIER", 1.0))
+TP_MULTIPLIER = float(os.getenv("TP_MULTIPLIER", 2.0))
 
 DB_ENABLED = os.getenv("DB_ENABLED", "false").lower() == "true"
 DB_URL = (
