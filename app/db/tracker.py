@@ -38,7 +38,6 @@ def save_signal(signal: Dict):
 
     # Clean up any numpy types in the payload
     cleaned = {k: _to_native(v) for k, v in signal.items()}
-    cleaned.setdefault("confirmed", cleaned["trend_confirmed"] and cleaned["higher_tf_confirmed"])
 
     # default fields
     cleaned.setdefault("hit", "PENDING")

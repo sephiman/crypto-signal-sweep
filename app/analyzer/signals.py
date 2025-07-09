@@ -194,8 +194,8 @@ def analyze_market(pairs, timeframe):
                 "momentum_ok": momentum_ok_long if side == "LONG" else momentum_ok_short,
                 "trend_confirmed": trend_ok_long if side == "LONG" else trend_ok_short,
                 "higher_tf_confirmed": confirm_long if side == "LONG" else confirm_short,
-                "unconfirmed": (not ((trend_ok_long if side == "LONG" else trend_ok_short) and (
-                    confirm_long if side == "LONG" else confirm_short))),
+                "confirmed": ((trend_ok_long if side == "LONG" else trend_ok_short) and
+                              (confirm_long if side == "LONG" else confirm_short)),
                 "score": long_score if side == "LONG" else short_score,
                 "required_score": min_score
             })
