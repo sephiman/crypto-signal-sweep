@@ -134,8 +134,8 @@ def analyze_market(pairs, timeframe):
                 )
                 ht_macd = ht_macd_obj.macd().iloc[-1]
                 ht_signal = ht_macd_obj.macd_signal().iloc[-1]
-                confirm_long = ht_rsi < RSI_OVERSOLD and ht_macd > ht_signal
-                confirm_short = ht_rsi > RSI_OVERBOUGHT and ht_macd < ht_signal
+                confirm_long = ht_rsi > RSI_MOMENTUM and ht_macd > ht_signal
+                confirm_short = ht_rsi < RSI_MOMENTUM and ht_macd < ht_signal
             else:
                 confirm_long = confirm_short = True
         else:
