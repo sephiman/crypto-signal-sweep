@@ -199,7 +199,23 @@ def analyze_market(pairs, timeframe):
                 "confirmed": ((trend_ok_long if side == "LONG" else trend_ok_short) and
                               (confirm_long if side == "LONG" else confirm_short)),
                 "score": long_score if side == "LONG" else short_score,
-                "required_score": min_score
+                "required_score": min_score,
+                "rsi_ok": rsi_ok_long if side == "LONG" else rsi_ok_short,
+                "ema_ok": ema_ok_long if side == "LONG" else ema_ok_short,
+                "macd_ok": (macd > signal_line) if side == "LONG" else (macd < signal_line),
+                "macd_momentum_ok": momentum_ok_long if side == "LONG" else momentum_ok_short,
+                "rsi": rsi,
+                "adx": adx,
+                "macd": macd,
+                "macd_signal": signal_line,
+                "macd_diff": diff,
+                "ema_fast": ema_fast,
+                "ema_slow": ema_slow,
+                "ema_diff": abs(ema_fast - ema_slow),
+                "atr": atr,
+                "atr_pct": atr / price,
+                "regime": "momentum" if adx >= ADX_THRESHOLD else "mean-reversion",
+                "htf_used": USE_HIGHER_TF_CONFIRM
             })
         else:
             score = max(long_score, short_score)

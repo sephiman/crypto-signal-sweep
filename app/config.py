@@ -4,9 +4,9 @@ import re
 PAIRS = os.getenv("PAIRS", "BTC/USDT").split(",")
 TIMEFRAMES = os.getenv("TIMEFRAMES", "15m").split(",")
 RUN_AT_START = os.getenv("RUN_AT_START", "false").lower() == "true"
-USE_HIGHER_TF_CONFIRM = os.getenv("USE_HIGHER_TF_CONFIRM", "false").lower() == "true"
+USE_HIGHER_TF_CONFIRM = os.getenv("USE_HIGHER_TF_CONFIRM", "true").lower() == "true"
 HIGHER_TF = os.getenv("HIGHER_TF", "1h")
-USE_TREND_FILTER = os.getenv("USE_TREND_FILTER", "false").lower() == "true"
+USE_TREND_FILTER = os.getenv("USE_TREND_FILTER", "true").lower() == "true"
 TREND_MA_PERIOD = int(os.getenv("TREND_MA_PERIOD", 21))
 REQUIRED_MA_BARS = int(os.getenv("REQUIRED_MA_BARS", 2))
 SEND_UNCONFIRMED = os.getenv("SEND_UNCONFIRMED", "false").lower() == "true"
@@ -16,7 +16,7 @@ MIN_SCORE_RANGING = int(os.getenv("MIN_SCORE_RANGING", 4))
 MIN_ATR_RATIO = float(os.getenv("MIN_ATR_RATIO", 0.0025))
 
 ADX_PERIOD = int(os.getenv("ADX_PERIOD", 14))
-ADX_THRESHOLD = int(os.getenv("ADX_THRESHOLD", 20))
+ADX_THRESHOLD = int(os.getenv("ADX_THRESHOLD", 25))
 ADX_RSI_MODE = os.getenv("ADX_RSI_MODE", "adx").lower()
 
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", 14))
