@@ -10,33 +10,30 @@ USE_TREND_FILTER = os.getenv("USE_TREND_FILTER", "true").lower() == "true"
 TREND_MA_PERIOD = int(os.getenv("TREND_MA_PERIOD", 21))
 REQUIRED_MA_BARS = int(os.getenv("REQUIRED_MA_BARS", 2))
 SEND_UNCONFIRMED = os.getenv("SEND_UNCONFIRMED", "false").lower() == "true"
-DYNAMIC_SCORE_ENABLED = os.getenv("DYNAMIC_SCORE_ENABLED", "false").lower() == "true"
+DYNAMIC_SCORE_ENABLED = os.getenv("DYNAMIC_SCORE_ENABLED", "true").lower() == "true"
 MIN_SCORE_DEFAULT = int(os.getenv("MIN_SCORE_DEFAULT", 6))
 MIN_SCORE_RANGING = int(os.getenv("MIN_SCORE_RANGING", 4))
-MIN_ATR_RATIO = float(os.getenv("MIN_ATR_RATIO", 0.0025))
+MIN_ATR_RATIO = float(os.getenv("MIN_ATR_RATIO", 0.0030))
 
 ADX_PERIOD = int(os.getenv("ADX_PERIOD", 14))
 ADX_THRESHOLD = int(os.getenv("ADX_THRESHOLD", 25))
 ADX_RSI_MODE = os.getenv("ADX_RSI_MODE", "adx").lower()
 
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", 14))
-RSI_OVERSOLD = float(os.getenv("RSI_OVERSOLD", 35))
-RSI_OVERBOUGHT = float(os.getenv("RSI_OVERBOUGHT", 65))
+RSI_OVERSOLD = float(os.getenv("RSI_OVERSOLD", 30))
+RSI_OVERBOUGHT = float(os.getenv("RSI_OVERBOUGHT", 70))
 RSI_MOMENTUM = float(os.getenv("RSI_MOMENTUM", 50))
 
 MACD_FAST = int(os.getenv("MACD_FAST", 12))
 MACD_SLOW = int(os.getenv("MACD_SLOW", 26))
 MACD_SIGNAL = int(os.getenv("MACD_SIGNAL", 9))
-MACD_MIN_DIFF = float(os.getenv("MACD_MIN_DIFF", 0.5))
+MACD_MIN_DIFF = float(os.getenv("MACD_MIN_DIFF", 1.0))
 MACD_MIN_DIFF_ENABLED = os.getenv("MACD_MIN_DIFF_ENABLED", "true").lower() == "true"
 
 EMA_FAST = int(os.getenv("EMA_FAST", 9))
 EMA_SLOW = int(os.getenv("EMA_SLOW", 21))
-EMA_MIN_DIFF = int(os.getenv("EMA_MIN_DIFF", 10))
+EMA_MIN_DIFF = int(os.getenv("EMA_MIN_DIFF", 12))
 EMA_MIN_DIFF_ENABLED = os.getenv("EMA_MIN_DIFF_ENABLED", "true").lower() == "true"
-
-SL_MULTIPLIER = float(os.getenv("SL_MULTIPLIER", 1.0))
-TP_MULTIPLIER = float(os.getenv("TP_MULTIPLIER", 2.0))
 
 DB_ENABLED = os.getenv("DB_ENABLED", "false").lower() == "true"
 DB_URL = (
@@ -52,7 +49,7 @@ ATR_PERIOD = int(os.getenv("ATR_PERIOD", 14))
 # how many ATRs away to place your stop
 ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.0))
 # how many ATRs away to place your take profit
-ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 2.0))
+ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 1.0))
 
 
 def tf_to_minutes(tf: str) -> int:
