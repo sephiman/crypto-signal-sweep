@@ -38,3 +38,5 @@ class Signal(Base):
     atr_pct = Column(Float, nullable=True)
     regime = Column(String, nullable=True)
     htf_used = Column(Boolean, nullable=False, default=False)
+    volume_ratio = Column(Float, nullable=True, default=1.0)
+    confidence = Column(String, nullable=True, default='MEDIUM')

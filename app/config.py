@@ -12,16 +12,17 @@ REQUIRED_MA_BARS = int(os.getenv("REQUIRED_MA_BARS", 2))
 SEND_UNCONFIRMED = os.getenv("SEND_UNCONFIRMED", "false").lower() == "true"
 DYNAMIC_SCORE_ENABLED = os.getenv("DYNAMIC_SCORE_ENABLED", "true").lower() == "true"
 MIN_SCORE_DEFAULT = int(os.getenv("MIN_SCORE_DEFAULT", 6))
+MIN_SCORE_TRENDING = int(os.getenv("MIN_SCORE_TRENDING", "5"))
 MIN_SCORE_RANGING = int(os.getenv("MIN_SCORE_RANGING", 4))
 MIN_ATR_RATIO = float(os.getenv("MIN_ATR_RATIO", 0.0030))
 
 ADX_PERIOD = int(os.getenv("ADX_PERIOD", 14))
-ADX_THRESHOLD = int(os.getenv("ADX_THRESHOLD", 25))
+ADX_THRESHOLD = int(os.getenv("ADX_THRESHOLD", 28))
 ADX_RSI_MODE = os.getenv("ADX_RSI_MODE", "adx").lower()
 
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", 14))
-RSI_OVERSOLD = float(os.getenv("RSI_OVERSOLD", 30))
-RSI_OVERBOUGHT = float(os.getenv("RSI_OVERBOUGHT", 70))
+RSI_OVERSOLD = float(os.getenv("RSI_OVERSOLD", 25))
+RSI_OVERBOUGHT = float(os.getenv("RSI_OVERBOUGHT", 75))
 RSI_MOMENTUM = float(os.getenv("RSI_MOMENTUM", 50))
 
 MACD_FAST = int(os.getenv("MACD_FAST", 12))
@@ -47,10 +48,18 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 # how many candles to use when computing ATR
 ATR_PERIOD = int(os.getenv("ATR_PERIOD", 14))
 # how many ATRs away to place your stop
-ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.0))
+ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.2))
 # how many ATRs away to place your take profit
-ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 1.0))
+ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 2.4))
 
+# Volume confirmation
+VOLUME_CONFIRMATION_ENABLED = os.getenv("VOLUME_CONFIRMATION_ENABLED", "true").lower() == "true"
+MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "1.4"))
+
+# Time-based filtering
+TIME_FILTER_ENABLED = os.getenv("TIME_FILTER_ENABLED", "true").lower() == "true"
+AVOID_HOURS_START = int(os.getenv("AVOID_HOURS_START", "2"))
+AVOID_HOURS_END = int(os.getenv("AVOID_HOURS_END", "6"))
 
 def tf_to_minutes(tf: str) -> int:
     m = re.match(r"(\d+)([mh])", tf)

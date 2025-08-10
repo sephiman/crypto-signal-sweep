@@ -13,26 +13,28 @@ def send_alerts(signals):
         return
 
     if len(signals) == 1 and "summary" in signals[0]:
-        text = (
-            "📊 *Daily Summary*\n"
-            f"{signals[0]['summary']}"
-        )
+        text = f"📊 *Daily Summary*\n{signals[0]['summary']}"
     else:
-        lines = ["📡 *Signal Alert*"]
+        lines = ["🚨 *Signal Alert*"]
         for s in signals:
             if not all(k in s for k in ("pair", "timeframe", "side")):
                 continue
 
+            # Calculate risk-reward ratio
+            risk = abs(s['price'] - s['stop_loss'])
+            reward = abs(s['take_profit'] - s['price'])
+            rr_ratio = reward / risk if risk > 0 else 0
+
+            confidence_emoji = "🔥" if s.get('confidence') == 'HIGH' else "⚡"
+
             lines.append(
-                f"\n*Pair:* {s['pair']}"
-                f"\n*Timeframe:* {s['timeframe']}"
-                f"\n*Side:* {s['side']}"
-                f"\n*Price:* {s['price']:.4f}"
-                f"\n*SL:* {s['stop_loss']:.4f}"
-                f"\n*TP:* {s['take_profit']:.4f}"
-                f"\n*Time:* {s['timestamp']:%Y-%m-%d %H:%M:%S} UTC"
-                f"\n*Score:* {s.get('score', '?')}/6 (min: {s.get('required_score', '?')})"
-                f"\n*Gates:* Momentum={s['momentum_ok']} | Trend={s['trend_confirmed']} | HTF={s['higher_tf_confirmed']} | Confirmed={s['confirmed']}\n"
+                f"\n{confidence_emoji} *{s['pair']}* | {s['timeframe']} | *{s['side']}*"
+                f"\n💰 *Entry:* {s['price']:.4f}"
+                f"\n🛑 *SL:* {s['stop_loss']:.4f} | 🎯 *TP:* {s['take_profit']:.4f}"
+                f"\n📊 *RR:* {rr_ratio:.1f}:1 | *Score:* {s.get('score', '?')}/{s.get('required_score', '?')}"
+                f"\n📈 *RSI:* {s.get('rsi', 0):.1f} | *ADX:* {s.get('adx', 0):.1f}"
+                f"\n🔄 *Volume:* {s.get('volume_ratio', 1.0):.1f}x | *Confidence:* {s.get('confidence', 'MEDIUM')}"
+                f"\n⏰ {s['timestamp']:%H:%M UTC}\n"
             )
         text = "\n".join(lines)
 
