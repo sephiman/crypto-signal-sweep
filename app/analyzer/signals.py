@@ -170,9 +170,21 @@ def analyze_market(pairs, timeframe):
                   (not USE_HIGHER_TF_CONFIRM or confirm_short)):
                 side = "SHORT"
 
-            # ATR volatility filter (keep existing)
-            if (atr / price) < MIN_ATR_RATIO:
-                logger.info(f"{timeframe} | {pair} | Skipped: ATR too low")
+            # ATR volatility filter
+            atr_pct = atr / price
+            volume_ratio = _get_volume_ratio(data)
+
+            # Single comprehensive log line with all metrics
+            logger.info(
+                f"{timeframe} | {pair} | "
+                f"RSI:{rsi:.1f} ADX:{adx:.1f} MACD:{diff:.3f} "
+                f"EMA:{ema_fast:.1f}/{ema_slow:.1f} ATR:{atr_pct:.4%} Vol:{volume_ratio:.1f}x | "
+                f"Regime:{'trending' if adx >= ADX_THRESHOLD else 'ranging'} | "
+                f"Gates L:{long_score}/S:{short_score} Min:{min_score}"
+            )
+
+            if atr_pct < MIN_ATR_RATIO:
+                logger.info(f"❌ {timeframe} | {pair} | SKIPPED: ATR too low ({atr_pct:.4%} < {MIN_ATR_RATIO:.4%})")
                 continue
 
             if side != "NONE":
