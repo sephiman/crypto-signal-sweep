@@ -17,7 +17,8 @@ from app.config import (
     SEND_UNCONFIRMED, ADX_PERIOD, ADX_THRESHOLD, RSI_MOMENTUM, ADX_RSI_MODE, MACD_MIN_DIFF_ENABLED,
     EMA_MIN_DIFF_ENABLED, DYNAMIC_SCORE_ENABLED, MIN_SCORE_RANGING, MIN_SCORE_DEFAULT, MIN_ATR_RATIO,
     MIN_SCORE_TRENDING, TIME_FILTER_ENABLED, AVOID_HOURS_START, AVOID_HOURS_END, MIN_VOLUME_RATIO,
-    VOLUME_CONFIRMATION_ENABLED
+    VOLUME_CONFIRMATION_ENABLED, RSI_TRENDING_MODE, RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
+    RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT
 )
 
 logger = logging.getLogger(__name__)
@@ -40,17 +41,14 @@ def analyze_market(pairs, timeframe):
         try:
             data = df[pair]
             if len(data) < 50:  # Need sufficient data
+                logger.info(f"⏭️ SKIP | {timeframe} | {pair} | Reason:INSUFFICIENT_DATA (<50 candles)")
                 continue
 
             price = _get_last_price(pair)
 
-            # Volume confirmation check
-            if VOLUME_CONFIRMATION_ENABLED:
-                if not _check_volume_confirmation(data):
-                    logger.debug(f"Skipping {pair} - insufficient volume")
-                    continue
+            # Calculate ALL indicators first (always)
+            volume_ratio = _get_volume_ratio(data)
 
-            # Calculate indicators
             rsi = RSIIndicator(data['close'], window=RSI_PERIOD).rsi().iloc[-1]
             macd_obj = MACD(
                 close=data['close'],
@@ -62,6 +60,25 @@ def analyze_market(pairs, timeframe):
             signal_line = macd_obj.macd_signal().iloc[-1]
             diff = macd - signal_line
 
+            ema_fast = data['close'].ewm(span=EMA_FAST).mean().iloc[-1]
+            ema_slow = data['close'].ewm(span=EMA_SLOW).mean().iloc[-1]
+
+            atr = AverageTrueRange(
+                high=data['high'], low=data['low'], close=data['close'], window=ATR_PERIOD
+            ).average_true_range().iloc[-1]
+            atr_pct = atr / price
+
+            from ta.trend import ADXIndicator
+            adx = ADXIndicator(
+                high=data['high'], low=data['low'], close=data['close'], window=ADX_PERIOD
+            ).adx().iloc[-1]
+
+            # Calculate filter conditions
+            volume_pass = not VOLUME_CONFIRMATION_ENABLED or _check_volume_confirmation(data)
+            atr_pass = atr_pct >= MIN_ATR_RATIO
+
+            min_ema_separation = atr * 0.5
+
             # Enhanced MACD momentum check
             if MACD_MIN_DIFF_ENABLED:
                 momentum_ok_long = (macd > signal_line) and (diff >= MACD_MIN_DIFF)
@@ -70,17 +87,7 @@ def analyze_market(pairs, timeframe):
                 momentum_ok_long = macd > signal_line
                 momentum_ok_short = macd < signal_line
 
-            # Enhanced EMA check with minimum separation
-            ema_fast = data['close'].ewm(span=EMA_FAST).mean().iloc[-1]
-            ema_slow = data['close'].ewm(span=EMA_SLOW).mean().iloc[-1]
-
-            # Calculate ATR for dynamic EMA separation
-            atr = AverageTrueRange(
-                high=data['high'], low=data['low'], close=data['close'], window=ATR_PERIOD
-            ).average_true_range().iloc[-1]
-
-            min_ema_separation = atr * 0.5  # Dynamic minimum separation
-
+            # Enhanced EMA check
             if EMA_MIN_DIFF_ENABLED:
                 ema_separation = abs(ema_fast - ema_slow)
                 ema_ok_long = (ema_fast > ema_slow) and (ema_separation >= min_ema_separation)
@@ -89,29 +96,34 @@ def analyze_market(pairs, timeframe):
                 ema_ok_long = ema_fast > ema_slow
                 ema_ok_short = ema_fast < ema_slow
 
-            # Enhanced ADX-based regime detection
-            from ta.trend import ADXIndicator
-            adx = ADXIndicator(
-                high=data['high'], low=data['low'], close=data['close'], window=ADX_PERIOD
-            ).adx().iloc[-1]
-
-            # Stricter RSI regime logic
+            # RSI regime logic
             if ADX_RSI_MODE == "rsi":
-                rsi_ok_long = rsi < RSI_OVERSOLD  # Now 25 instead of 30
-                rsi_ok_short = rsi > RSI_OVERBOUGHT  # Now 75 instead of 70
+                # Simple mode: always use standard oversold/overbought levels
+                rsi_ok_long = rsi < RSI_OVERSOLD
+                rsi_ok_short = rsi > RSI_OVERBOUGHT
             else:
-                is_trending = adx >= ADX_THRESHOLD  # Now 28 instead of 25
+                # ADX-based adaptive mode
+                is_trending = adx >= ADX_THRESHOLD
 
                 if is_trending:
-                    # In trending markets, only take extreme RSI signals
-                    rsi_ok_long = rsi < 35 and rsi > RSI_MOMENTUM  # More selective
-                    rsi_ok_short = rsi > 65 and rsi < RSI_MOMENTUM  # More selective
+                    # Market is trending - use trending-specific RSI strategy
+                    if RSI_TRENDING_MODE == "pullback":
+                        # Pullback mode: Look for mild retracements in strong trends
+                        # Long: RSI pulls back but stays above support level
+                        rsi_ok_long = RSI_TRENDING_PULLBACK_LONG < rsi < RSI_MOMENTUM
+                        # Short: RSI pulls back but stays below resistance level
+                        rsi_ok_short = RSI_MOMENTUM < rsi < RSI_TRENDING_PULLBACK_SHORT
+                    else:
+                        # Extreme mode (default): Require even more extreme levels in trends
+                        # This filters out weak signals in strong trends
+                        rsi_ok_long = rsi < RSI_TRENDING_OVERSOLD
+                        rsi_ok_short = rsi > RSI_TRENDING_OVERBOUGHT
                 else:
-                    # In ranging markets, use extreme RSI
+                    # Market is ranging - use standard oversold/overbought levels
                     rsi_ok_long = rsi < RSI_OVERSOLD
                     rsi_ok_short = rsi > RSI_OVERBOUGHT
 
-            # Existing trend filter logic
+            # Trend filter logic
             if USE_TREND_FILTER:
                 sma = data['close'].rolling(window=TREND_MA_PERIOD).mean()
                 recent_closes = data['close'].iloc[-REQUIRED_MA_BARS:]
@@ -121,7 +133,7 @@ def analyze_market(pairs, timeframe):
             else:
                 trend_ok_long = trend_ok_short = True
 
-            # Enhanced higher timeframe confirmation
+            # Higher timeframe confirmation
             if USE_HIGHER_TF_CONFIRM:
                 higher_tf = HIGHER_TF_MAP.get(timeframe)
                 if higher_tf:
@@ -131,7 +143,7 @@ def analyze_market(pairs, timeframe):
             else:
                 confirm_long = confirm_short = True
 
-            # Enhanced scoring system with stricter requirements
+            # Scoring system
             long_gates = [
                 rsi_ok_long,
                 macd > signal_line,
@@ -153,101 +165,102 @@ def analyze_market(pairs, timeframe):
             long_score = sum(long_gates)
             short_score = sum(short_gates)
 
-            # Enhanced minimum score logic
             min_score = _enhanced_min_score(is_trending if 'is_trending' in locals() else adx >= ADX_THRESHOLD)
 
+            # Determine signal side
             side = "NONE"
-
-            # For LONG: require RSI extreme + strong momentum + trend alignment
             if (long_score >= min_score and
                     rsi_ok_long and momentum_ok_long and ema_ok_long and
                     (not USE_HIGHER_TF_CONFIRM or confirm_long)):
                 side = "LONG"
-
-            # For SHORT: require RSI extreme + strong momentum + trend alignment
             elif (short_score >= min_score and
                   rsi_ok_short and momentum_ok_short and ema_ok_short and
                   (not USE_HIGHER_TF_CONFIRM or confirm_short)):
                 side = "SHORT"
 
-            # ATR volatility filter
-            atr_pct = atr / price
-            volume_ratio = _get_volume_ratio(data)
+            # Determine final status and reason
+            if not volume_pass:
+                status = "⏭️ SKIP"
+                result = f"LOW_VOL({volume_ratio:.1f}x<{MIN_VOLUME_RATIO}x)"
+            elif not atr_pass:
+                status = "⏭️ SKIP"
+                result = f"LOW_ATR({atr_pct:.3%}<{MIN_ATR_RATIO:.3%})"
+            elif side != "NONE":
+                status = "✅ SIGNAL"
+                result = side
+            else:
+                status = "⏭️ SKIP"
+                result = "NO_SIGNAL"
 
-            # Single comprehensive log line with all metrics
+            # All metrics
             logger.info(
-                f"{timeframe} | {pair} | "
-                f"RSI:{rsi:.1f} ADX:{adx:.1f} MACD:{diff:.3f} "
-                f"EMA:{ema_fast:.1f}/{ema_slow:.1f} ATR:{atr_pct:.4%} Vol:{volume_ratio:.1f}x | "
-                f"Regime:{'trending' if adx >= ADX_THRESHOLD else 'ranging'} | "
-                f"Gates L:{long_score}/S:{short_score} Min:{min_score}"
+                f"{status} | {timeframe} | {pair} | "
+                f"Price:{price:.2f} RSI:{rsi:.1f} ADX:{adx:.1f} MACD:{diff:.4f} "
+                f"EMA:{ema_fast:.2f}/{ema_slow:.2f} ATR:{atr_pct:.3%} VOL:{volume_ratio:.1f}x | "
+                f"Regime:{'TREND' if adx >= ADX_THRESHOLD else 'RANGE'} "
+                f"Score:L{long_score}/S{short_score}(min:{min_score}) | "
+                f"Gates[L/S]: RSI:{int(rsi_ok_long)}/{int(rsi_ok_short)} "
+                f"MACD:{int(momentum_ok_long)}/{int(momentum_ok_short)} "
+                f"EMA:{int(ema_ok_long)}/{int(ema_ok_short)} "
+                f"Trend:{int(trend_ok_long)}/{int(trend_ok_short)} "
+                f"HTF:{int(confirm_long)}/{int(confirm_short)} | "
+                f"Result:{result}"
             )
 
-            if atr_pct < MIN_ATR_RATIO:
-                logger.info(f"❌ {timeframe} | {pair} | SKIPPED: ATR too low ({atr_pct:.4%} < {MIN_ATR_RATIO:.4%})")
+            # Skip if filters don't pass
+            if not atr_pass or not volume_pass or side == "NONE":
                 continue
 
-            if side != "NONE":
-                # Improved SL/TP calculation
-                sl, tp = _calculate_enhanced_sl_tp(price, atr, side, pair)
+            # Generate signal details
+            sl, tp = _calculate_enhanced_sl_tp(price, atr, side, pair)
 
-                # Ensure minimum 2:1 risk-reward ratio
-                risk = abs(price - sl)
-                reward = abs(tp - price)
+            # Ensure minimum 2:1 risk-reward ratio
+            risk = abs(price - sl)
+            reward = abs(tp - price)
 
-                if reward / risk < 2.0:
-                    # Adjust TP to maintain 2:1 ratio
-                    if side == "LONG":
-                        tp = price + (risk * 2.0)
-                    else:
-                        tp = price - (risk * 2.0)
+            if reward / risk < 2.0:
+                if side == "LONG":
+                    tp = price + (risk * 2.0)
+                else:
+                    tp = price - (risk * 2.0)
 
-                logger.info(
-                    f"{timeframe} | {pair} | {side} Signal Generated\n"
-                    f"  Price: {price:.4f} | SL: {sl:.4f} | TP: {tp:.4f}\n"
-                    f"  RSI: {rsi:.1f} | ADX: {adx:.1f} | MACD: {diff:.3f}\n"
-                    f"  Score: {long_score if side == 'LONG' else short_score}/{min_score}\n"
-                    f"  RR Ratio: {reward / risk:.2f}:1"
-                )
-
-                signals.append({
-                    "pair": pair,
-                    "timeframe": timeframe,
-                    "side": side,
-                    "price": price,
-                    "stop_loss": sl,
-                    "take_profit": tp,
-                    "timestamp": datetime.datetime.now(datetime.UTC),
-                    "momentum_ok": momentum_ok_long if side == "LONG" else momentum_ok_short,
-                    "trend_confirmed": trend_ok_long if side == "LONG" else trend_ok_short,
-                    "higher_tf_confirmed": confirm_long if side == "LONG" else confirm_short,
-                    "confirmed": ((trend_ok_long if side == "LONG" else trend_ok_short) and
-                                  (confirm_long if side == "LONG" else confirm_short)),
-                    "score": long_score if side == "LONG" else short_score,
-                    "required_score": min_score,
-                    "rsi_ok": rsi_ok_long if side == "LONG" else rsi_ok_short,
-                    "ema_ok": ema_ok_long if side == "LONG" else ema_ok_short,
-                    "macd_ok": (macd > signal_line) if side == "LONG" else (macd < signal_line),
-                    "macd_momentum_ok": momentum_ok_long if side == "LONG" else momentum_ok_short,
-                    "rsi": rsi,
-                    "adx": adx,
-                    "macd": macd,
-                    "macd_signal": signal_line,
-                    "macd_diff": diff,
-                    "ema_fast": ema_fast,
-                    "ema_slow": ema_slow,
-                    "ema_diff": abs(ema_fast - ema_slow),
-                    "atr": atr,
-                    "atr_pct": atr / price,
-                    "regime": "momentum" if adx >= ADX_THRESHOLD else "mean-reversion",
-                    "htf_used": USE_HIGHER_TF_CONFIRM,
-                    "volume_ratio": _get_volume_ratio(data),  # New field
-                    "confidence": "HIGH" if long_score >= min_score + 1 or short_score >= min_score + 1 else "MEDIUM"
-                    # New field
-                })
+            signals.append({
+                "pair": pair,
+                "timeframe": timeframe,
+                "side": side,
+                "price": price,
+                "stop_loss": sl,
+                "take_profit": tp,
+                "timestamp": datetime.datetime.now(datetime.UTC),
+                "momentum_ok": momentum_ok_long if side == "LONG" else momentum_ok_short,
+                "trend_confirmed": trend_ok_long if side == "LONG" else trend_ok_short,
+                "higher_tf_confirmed": confirm_long if side == "LONG" else confirm_short,
+                "confirmed": ((trend_ok_long if side == "LONG" else trend_ok_short) and
+                              (confirm_long if side == "LONG" else confirm_short)),
+                "score": long_score if side == "LONG" else short_score,
+                "required_score": min_score,
+                "rsi_ok": rsi_ok_long if side == "LONG" else rsi_ok_short,
+                "ema_ok": ema_ok_long if side == "LONG" else ema_ok_short,
+                "macd_ok": (macd > signal_line) if side == "LONG" else (macd < signal_line),
+                "macd_momentum_ok": momentum_ok_long if side == "LONG" else momentum_ok_short,
+                "rsi": rsi,
+                "adx": adx,
+                "macd": macd,
+                "macd_signal": signal_line,
+                "macd_diff": diff,
+                "ema_fast": ema_fast,
+                "ema_slow": ema_slow,
+                "ema_diff": abs(ema_fast - ema_slow),
+                "atr": atr,
+                "atr_pct": atr_pct,
+                "regime": "momentum" if adx >= ADX_THRESHOLD else "mean-reversion",
+                "htf_used": USE_HIGHER_TF_CONFIRM,
+                "volume_ratio": volume_ratio,
+                "confidence": "HIGH" if long_score >= min_score + 1 or short_score >= min_score + 1 else "MEDIUM"
+            })
 
         except Exception as e:
-            logger.error(f"Error analyzing {pair}: {e}")
+            logger.error(f"ERROR | {timeframe} | {pair} | Exception: {e}")
             continue
 
     return signals

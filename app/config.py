@@ -20,10 +20,22 @@ ADX_PERIOD = int(os.getenv("ADX_PERIOD", 14))
 ADX_THRESHOLD = int(os.getenv("ADX_THRESHOLD", 28))
 ADX_RSI_MODE = os.getenv("ADX_RSI_MODE", "adx").lower()
 
+# RSI Configuration for Ranging Markets (standard oversold/overbought)
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", 14))
-RSI_OVERSOLD = float(os.getenv("RSI_OVERSOLD", 25))
-RSI_OVERBOUGHT = float(os.getenv("RSI_OVERBOUGHT", 75))
+RSI_OVERSOLD = float(os.getenv("RSI_OVERSOLD", 30))
+RSI_OVERBOUGHT = float(os.getenv("RSI_OVERBOUGHT", 70))
 RSI_MOMENTUM = float(os.getenv("RSI_MOMENTUM", 50))
+
+# RSI Configuration for Trending Markets (when ADX_RSI_MODE="adx" and ADX >= threshold)
+# Option 1: Use more extreme levels in trends (default)
+RSI_TRENDING_OVERSOLD = float(os.getenv("RSI_TRENDING_OVERSOLD", 25))  # More extreme for trends
+RSI_TRENDING_OVERBOUGHT = float(os.getenv("RSI_TRENDING_OVERBOUGHT", 75))  # More extreme for trends
+
+# Option 2: Use momentum pullback levels (alternative approach)
+# Set RSI_TRENDING_MODE to "pullback" to look for mild pullbacks in trends instead of extremes
+RSI_TRENDING_MODE = os.getenv("RSI_TRENDING_MODE", "extreme").lower()  # "extreme" or "pullback"
+RSI_TRENDING_PULLBACK_LONG = float(os.getenv("RSI_TRENDING_PULLBACK_LONG", 40))  # Buy pullbacks above this in uptrends
+RSI_TRENDING_PULLBACK_SHORT = float(os.getenv("RSI_TRENDING_PULLBACK_SHORT", 60))  # Sell pullbacks below this in downtrends
 
 MACD_FAST = int(os.getenv("MACD_FAST", 12))
 MACD_SLOW = int(os.getenv("MACD_SLOW", 26))
