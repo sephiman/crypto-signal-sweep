@@ -40,3 +40,56 @@ class Signal(Base):
     htf_used = Column(Boolean, nullable=False, default=False)
     volume_ratio = Column(Float, nullable=True, default=1.0)
     confidence = Column(String, nullable=True, default='MEDIUM')
+
+
+class MarketAnalysis(Base):
+    __tablename__ = 'market_analyses'
+    id = Column(Integer, primary_key=True, index=True)
+    pair = Column(String, nullable=False)
+    timeframe = Column(String, nullable=False)
+    timestamp = Column(DateTime, nullable=False)
+    price = Column(Float, nullable=False)
+    
+    # Technical indicators
+    rsi = Column(Float, nullable=False)
+    adx = Column(Float, nullable=False)
+    macd = Column(Float, nullable=False)
+    macd_signal = Column(Float, nullable=False)
+    macd_diff = Column(Float, nullable=False)
+    ema_fast = Column(Float, nullable=False)
+    ema_slow = Column(Float, nullable=False)
+    ema_diff = Column(Float, nullable=False)
+    atr = Column(Float, nullable=False)
+    atr_pct = Column(Float, nullable=False)
+    volume_ratio = Column(Float, nullable=False)
+    
+    # Gate conditions (boolean checks)
+    rsi_ok_long = Column(Boolean, nullable=False)
+    rsi_ok_short = Column(Boolean, nullable=False)
+    macd_ok_long = Column(Boolean, nullable=False)
+    macd_ok_short = Column(Boolean, nullable=False)
+    momentum_ok_long = Column(Boolean, nullable=False)
+    momentum_ok_short = Column(Boolean, nullable=False)
+    ema_ok_long = Column(Boolean, nullable=False)
+    ema_ok_short = Column(Boolean, nullable=False)
+    trend_ok_long = Column(Boolean, nullable=False)
+    trend_ok_short = Column(Boolean, nullable=False)
+    htf_confirm_long = Column(Boolean, nullable=False)
+    htf_confirm_short = Column(Boolean, nullable=False)
+    
+    # Filter conditions
+    volume_pass = Column(Boolean, nullable=False)
+    atr_pass = Column(Boolean, nullable=False)
+    time_pass = Column(Boolean, nullable=False)
+    
+    # Scores and regime
+    long_score = Column(Integer, nullable=False)
+    short_score = Column(Integer, nullable=False)
+    min_score_required = Column(Integer, nullable=False)
+    regime = Column(String, nullable=False)  # 'TREND' or 'RANGE'
+    is_trending = Column(Boolean, nullable=False)
+    
+    # Final result
+    signal_generated = Column(Boolean, nullable=False, default=False)
+    signal_side = Column(String, nullable=True)  # 'LONG', 'SHORT', or None
+    skip_reason = Column(String, nullable=True)  # 'LOW_VOL', 'LOW_ATR', 'NO_SIGNAL', etc.

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 import datetime
 from sqlalchemy.orm import Session
 from app.config import DB_ENABLED, DB_URL
-from app.db.models import Signal
+from app.db.models import Signal, MarketAnalysis
 
 engine = None
 if DB_ENABLED:
@@ -169,3 +169,21 @@ def has_recent_pending(pair: str, timeframe: str, cooldown_minutes: int, session
         .limit(1)
     )
     return session.execute(q).first() is not None
+
+
+def save_market_analysis(analysis_data: Dict):
+    """Insert a new MarketAnalysis row, skipping if DB disabled."""
+    if not DB_ENABLED:
+        return
+
+    # Clean up any numpy types in the payload
+    cleaned = {k: _to_native(v) for k, v in analysis_data.items()}
+
+    try:
+        with Session(engine) as session:
+            analysis = MarketAnalysis(**cleaned)
+            session.add(analysis)
+            session.commit()
+            logger.debug(f"Saved market analysis: {analysis.pair} {analysis.timeframe} - {analysis.regime}")
+    except SQLAlchemyError as e:
+        logger.error(f"DB error saving market analysis: {e}")

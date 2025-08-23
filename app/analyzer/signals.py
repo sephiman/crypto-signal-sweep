@@ -24,6 +24,8 @@ from app.config import (
 logger = logging.getLogger(__name__)
 exchange = ccxt.binance()
 
+from app.db.tracker import save_market_analysis
+
 
 def analyze_market(pairs, timeframe):
     """
@@ -206,6 +208,49 @@ def analyze_market(pairs, timeframe):
                 f"HTF:{int(confirm_long)}/{int(confirm_short)} | "
                 f"Result:{result}"
             )
+
+            # Save market analysis data to database (both signals and non-signals)
+            analysis_data = {
+                "pair": pair,
+                "timeframe": timeframe,
+                "timestamp": datetime.datetime.now(datetime.UTC),
+                "price": price,
+                "rsi": rsi,
+                "adx": adx,
+                "macd": macd,
+                "macd_signal": signal_line,
+                "macd_diff": diff,
+                "ema_fast": ema_fast,
+                "ema_slow": ema_slow,
+                "ema_diff": abs(ema_fast - ema_slow),
+                "atr": atr,
+                "atr_pct": atr_pct,
+                "volume_ratio": volume_ratio,
+                "rsi_ok_long": rsi_ok_long,
+                "rsi_ok_short": rsi_ok_short,
+                "macd_ok_long": macd > signal_line,
+                "macd_ok_short": macd < signal_line,
+                "momentum_ok_long": momentum_ok_long,
+                "momentum_ok_short": momentum_ok_short,
+                "ema_ok_long": ema_ok_long,
+                "ema_ok_short": ema_ok_short,
+                "trend_ok_long": trend_ok_long,
+                "trend_ok_short": trend_ok_short,
+                "htf_confirm_long": confirm_long,
+                "htf_confirm_short": confirm_short,
+                "volume_pass": volume_pass,
+                "atr_pass": atr_pass,
+                "time_pass": True,  # We already filtered for time above
+                "long_score": long_score,
+                "short_score": short_score,
+                "min_score_required": min_score,
+                "regime": "TREND" if adx >= ADX_THRESHOLD else "RANGE",
+                "is_trending": adx >= ADX_THRESHOLD,
+                "signal_generated": side != "NONE" and volume_pass and atr_pass,
+                "signal_side": side if side != "NONE" and volume_pass and atr_pass else None,
+                "skip_reason": result if not (side != "NONE" and volume_pass and atr_pass) else None
+            }
+            save_market_analysis(analysis_data)
 
             # Skip if filters don't pass
             if not atr_pass or not volume_pass or side == "NONE":
