@@ -29,7 +29,7 @@ from app.db.tracker import save_market_analysis
 
 def analyze_market(pairs, timeframe):
     """
-    Enhanced market analysis with improved filtering and scoring
+    Market analysis with improved filtering and scoring
     """
     # Add time filter check
     if TIME_FILTER_ENABLED and not _is_valid_trading_time():
@@ -81,7 +81,7 @@ def analyze_market(pairs, timeframe):
 
             min_ema_separation = atr * 0.5
 
-            # Enhanced MACD momentum check
+            # MACD momentum check
             if MACD_MIN_DIFF_ENABLED:
                 momentum_ok_long = (macd > signal_line) and (diff >= MACD_MIN_DIFF)
                 momentum_ok_short = (macd < signal_line) and (diff <= -MACD_MIN_DIFF)
@@ -89,7 +89,7 @@ def analyze_market(pairs, timeframe):
                 momentum_ok_long = macd > signal_line
                 momentum_ok_short = macd < signal_line
 
-            # Enhanced EMA check
+            # EMA check
             if EMA_MIN_DIFF_ENABLED:
                 ema_separation = abs(ema_fast - ema_slow)
                 ema_ok_long = (ema_fast > ema_slow) and (ema_separation >= min_ema_separation)
@@ -167,7 +167,7 @@ def analyze_market(pairs, timeframe):
             long_score = sum(long_gates)
             short_score = sum(short_gates)
 
-            min_score = _enhanced_min_score(is_trending if 'is_trending' in locals() else adx >= ADX_THRESHOLD)
+            min_score = _dynamic_min_score_trending(is_trending if 'is_trending' in locals() else adx >= ADX_THRESHOLD)
 
             # Determine signal side
             side = "NONE"
@@ -197,8 +197,8 @@ def analyze_market(pairs, timeframe):
             # All metrics
             logger.info(
                 f"{status} | {timeframe} | {pair} | "
-                f"Price:{price:.2f} RSI:{rsi:.1f} ADX:{adx:.1f} MACD:{diff:.4f} "
-                f"EMA:{ema_fast:.2f}/{ema_slow:.2f} ATR:{atr_pct:.3%} VOL:{volume_ratio:.1f}x | "
+                f"Price:{price:.6f} RSI:{rsi:.1f} ADX:{adx:.1f} MACD:{diff:.6f} "
+                f"EMA:{ema_fast:.6f}/{ema_slow:.6f} ATR:{atr_pct:.3%} VOL:{volume_ratio:.1f}x | "
                 f"Regime:{'TREND' if adx >= ADX_THRESHOLD else 'RANGE'} "
                 f"Score:L{long_score}/S{short_score}(min:{min_score}) | "
                 f"Gates[L/S]: RSI:{int(rsi_ok_long)}/{int(rsi_ok_short)} "
@@ -256,18 +256,24 @@ def analyze_market(pairs, timeframe):
             if not atr_pass or not volume_pass or side == "NONE":
                 continue
 
-            # Generate signal details
-            sl, tp = _calculate_enhanced_sl_tp(price, atr, side, pair)
+            # Generate signal details with dual TP
+            sl, tp1, tp2 = _calculate_sl_tp(price, atr, side, pair)
 
-            # Ensure minimum 2:1 risk-reward ratio
+            # Ensure minimum 2:1 risk-reward ratio for TP2
             risk = abs(price - sl)
-            reward = abs(tp - price)
+            reward = abs(tp2 - price)
 
             if reward / risk < 2.0:
                 if side == "LONG":
-                    tp = price + (risk * 2.0)
+                    tp2 = price + (risk * 2.0)
+                    # Recalculate TP1 as 50% of the new distance to TP2
+                    tp_distance = tp2 - price
+                    tp1 = price + (tp_distance * 0.5)
                 else:
-                    tp = price - (risk * 2.0)
+                    tp2 = price - (risk * 2.0)
+                    # Recalculate TP1 as 50% of the new distance to TP2
+                    tp_distance = price - tp2
+                    tp1 = price - (tp_distance * 0.5)
 
             signals.append({
                 "pair": pair,
@@ -275,7 +281,8 @@ def analyze_market(pairs, timeframe):
                 "side": side,
                 "price": price,
                 "stop_loss": sl,
-                "take_profit": tp,
+                "take_profit_1": tp1,
+                "take_profit_2": tp2,
                 "timestamp": datetime.datetime.now(datetime.UTC),
                 "momentum_ok": momentum_ok_long if side == "LONG" else momentum_ok_short,
                 "trend_confirmed": trend_ok_long if side == "LONG" else trend_ok_short,
@@ -382,7 +389,7 @@ def _get_volume_ratio(data):
 
 
 def _get_htf_confirmation(pair, higher_tf):
-    """Enhanced higher timeframe confirmation"""
+    """Higher timeframe confirmation"""
     try:
         hdf = _fetch_ohlcv_df([pair], higher_tf)[pair]
         if len(hdf) < 30:
@@ -398,7 +405,7 @@ def _get_htf_confirmation(pair, higher_tf):
         ht_macd = ht_macd_obj.macd().iloc[-1]
         ht_signal = ht_macd_obj.macd_signal().iloc[-1]
 
-        # Stricter HTF confirmation
+        # HTF confirmation
         confirm_long = ht_rsi > 45 and ht_macd > ht_signal and (ht_macd - ht_signal) > 0.5
         confirm_short = ht_rsi < 55 and ht_macd < ht_signal and (ht_signal - ht_macd) > 0.5
 
@@ -407,8 +414,8 @@ def _get_htf_confirmation(pair, higher_tf):
         return True, True  # Default to allowing signals if HTF fails
 
 
-def _enhanced_min_score(is_trending):
-    """Enhanced dynamic scoring with stricter requirements"""
+def _dynamic_min_score_trending(is_trending):
+    """Dynamic scoring with stricter requirements"""
     if DYNAMIC_SCORE_ENABLED:
         if is_trending:
             return MIN_SCORE_TRENDING
@@ -417,16 +424,25 @@ def _enhanced_min_score(is_trending):
     return MIN_SCORE_DEFAULT
 
 
-def _calculate_enhanced_sl_tp(price, atr, side, pair):
-    """Enhanced SL/TP calculation with better risk-reward ratios"""
+def _calculate_sl_tp(price, atr, side, pair):
+    """SL/TP calculation with dual take profit levels"""
     sl_mult = ATR_SL_MULTIPLIER
     tp_mult = ATR_TP_MULTIPLIER
 
     if side == "LONG":
         sl = price - (atr * sl_mult)
-        tp = price + (atr * tp_mult)
+        tp2 = price + (atr * tp_mult)  # Full TP (original level)
+        
+        # Calculate TP1 at 50% of the distance to TP2 for partial profit
+        tp_distance = tp2 - price
+        tp1 = price + (tp_distance * 0.5)
+        
     else:
         sl = price + (atr * sl_mult)
-        tp = price - (atr * tp_mult)
+        tp2 = price - (atr * tp_mult)  # Full TP (original level)
+        
+        # Calculate TP1 at 50% of the distance to TP2 for partial profit
+        tp_distance = price - tp2
+        tp1 = price - (tp_distance * 0.5)
 
-    return sl, tp
+    return sl, tp1, tp2

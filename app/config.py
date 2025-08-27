@@ -5,7 +5,6 @@ PAIRS = os.getenv("PAIRS", "BTC/USDT").split(",")
 TIMEFRAMES = os.getenv("TIMEFRAMES", "15m").split(",")
 RUN_AT_START = os.getenv("RUN_AT_START", "false").lower() == "true"
 USE_HIGHER_TF_CONFIRM = os.getenv("USE_HIGHER_TF_CONFIRM", "true").lower() == "true"
-HIGHER_TF = os.getenv("HIGHER_TF", "1h")
 USE_TREND_FILTER = os.getenv("USE_TREND_FILTER", "true").lower() == "true"
 TREND_MA_PERIOD = int(os.getenv("TREND_MA_PERIOD", 21))
 REQUIRED_MA_BARS = int(os.getenv("REQUIRED_MA_BARS", 2))
@@ -33,7 +32,7 @@ RSI_TRENDING_OVERBOUGHT = float(os.getenv("RSI_TRENDING_OVERBOUGHT", 75))  # Mor
 
 # Option 2: Use momentum pullback levels (alternative approach)
 # Set RSI_TRENDING_MODE to "pullback" to look for mild pullbacks in trends instead of extremes
-RSI_TRENDING_MODE = os.getenv("RSI_TRENDING_MODE", "extreme").lower()  # "extreme" or "pullback"
+RSI_TRENDING_MODE = os.getenv("RSI_TRENDING_MODE", "pullback").lower()  # "extreme" or "pullback"
 RSI_TRENDING_PULLBACK_LONG = float(os.getenv("RSI_TRENDING_PULLBACK_LONG", 40))  # Buy pullbacks above this in uptrends
 RSI_TRENDING_PULLBACK_SHORT = float(os.getenv("RSI_TRENDING_PULLBACK_SHORT", 60))  # Sell pullbacks below this in downtrends
 

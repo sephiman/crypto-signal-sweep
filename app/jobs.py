@@ -7,7 +7,7 @@ from app.config import PAIRS, tf_to_minutes
 from app.db.init_db import engine
 from app.db.tracker import check_hit_signals, summarize_and_notify
 from app.db.tracker import has_recent_pending, save_signal
-from app.telegram_bot import send_alerts
+from app.telegram_bot import send_alerts, send_tp1_alerts, send_signal_outcome_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -38,4 +38,9 @@ def run_midnight_summary_job():
 
 
 def run_hit_polling_job():
-    check_hit_signals()
+    hit_updates = check_hit_signals()
+    
+    # Send separate alerts for TP1 hits and final outcomes
+    if hit_updates:
+        send_tp1_alerts(hit_updates)
+        send_signal_outcome_alerts(hit_updates)
