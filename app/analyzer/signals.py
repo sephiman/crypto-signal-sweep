@@ -169,16 +169,67 @@ def analyze_market(pairs, timeframe):
 
             min_score = _dynamic_min_score_trending(is_trending if 'is_trending' in locals() else adx >= ADX_THRESHOLD)
 
-            # Determine signal side
+            # Determine signal side with detailed failure reasons
             side = "NONE"
-            if (long_score >= min_score and
-                    rsi_ok_long and momentum_ok_long and ema_ok_long and
-                    (not USE_HIGHER_TF_CONFIRM or confirm_long)):
+            none_reason = ""
+            
+            # Check LONG conditions
+            long_conditions_met = True
+            long_fail_reasons = []
+            
+            if long_score < min_score:
+                long_conditions_met = False
+                long_fail_reasons.append(f"LOW_SCORE(L{long_score}<{min_score})")
+            if not rsi_ok_long:
+                long_conditions_met = False
+                long_fail_reasons.append(f"RSI({rsi:.1f})")
+            if not momentum_ok_long:
+                long_conditions_met = False
+                long_fail_reasons.append(f"MACD({diff:.6f})")
+            if not ema_ok_long:
+                long_conditions_met = False
+                long_fail_reasons.append("EMA")
+            if not trend_ok_long:
+                long_conditions_met = False
+                long_fail_reasons.append("TREND")
+            if USE_HIGHER_TF_CONFIRM and not confirm_long:
+                long_conditions_met = False
+                long_fail_reasons.append("HTF")
+            
+            # Check SHORT conditions
+            short_conditions_met = True
+            short_fail_reasons = []
+            
+            if short_score < min_score:
+                short_conditions_met = False
+                short_fail_reasons.append(f"LOW_SCORE(S{short_score}<{min_score})")
+            if not rsi_ok_short:
+                short_conditions_met = False
+                short_fail_reasons.append(f"RSI({rsi:.1f})")
+            if not momentum_ok_short:
+                short_conditions_met = False
+                short_fail_reasons.append(f"MACD({diff:.6f})")
+            if not ema_ok_short:
+                short_conditions_met = False
+                short_fail_reasons.append("EMA")
+            if not trend_ok_short:
+                short_conditions_met = False
+                short_fail_reasons.append("TREND")
+            if USE_HIGHER_TF_CONFIRM and not confirm_short:
+                short_conditions_met = False
+                short_fail_reasons.append("HTF")
+            
+            # Determine final side
+            if long_conditions_met:
                 side = "LONG"
-            elif (short_score >= min_score and
-                  rsi_ok_short and momentum_ok_short and ema_ok_short and
-                  (not USE_HIGHER_TF_CONFIRM or confirm_short)):
+            elif short_conditions_met:
                 side = "SHORT"
+            else:
+                # Both failed - determine primary reason
+                if len(long_fail_reasons) <= len(short_fail_reasons):
+                    none_reason = f"LONG_FAIL({','.join(long_fail_reasons)})"
+                else:
+                    none_reason = f"SHORT_FAIL({','.join(short_fail_reasons)})"
 
             # Determine final status and reason
             if not volume_pass:
@@ -192,13 +243,13 @@ def analyze_market(pairs, timeframe):
                 result = side
             else:
                 status = "⏭️ SKIP"
-                result = "NO_SIGNAL"
+                result = none_reason if none_reason else "NO_SIGNAL"
 
             # All metrics
             logger.info(
                 f"{status} | {timeframe} | {pair} | "
-                f"Price:{price:.6f} RSI:{rsi:.1f} ADX:{adx:.1f} MACD:{diff:.6f} "
-                f"EMA:{ema_fast:.6f}/{ema_slow:.6f} ATR:{atr_pct:.3%} VOL:{volume_ratio:.1f}x | "
+                f"Price:{price:.2f} RSI:{rsi:.1f} ADX:{adx:.1f} MACD:{diff:.4f} "
+                f"EMA:{ema_fast:.2f}/{ema_slow:.2f} ATR:{atr_pct:.3%} VOL:{volume_ratio:.1f}x | "
                 f"Regime:{'TREND' if adx >= ADX_THRESHOLD else 'RANGE'} "
                 f"Score:L{long_score}/S{short_score}(min:{min_score}) | "
                 f"Gates[L/S]: RSI:{int(rsi_ok_long)}/{int(rsi_ok_short)} "

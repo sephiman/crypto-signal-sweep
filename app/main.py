@@ -32,6 +32,9 @@ for tf in TIMEFRAMES:
     if RUN_AT_START:
         run_analysis_job(tf)
 
+if RUN_AT_START:
+    run_midnight_summary_job()
+
 # Poll for SL/TP hits once per minute (no need to align to candles)
 scheduler.add_job(
     run_hit_polling_job,
