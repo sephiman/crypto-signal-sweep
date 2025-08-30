@@ -16,7 +16,7 @@ from app.config import (
     ATR_PERIOD, ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER,
     SEND_UNCONFIRMED, ADX_PERIOD, ADX_THRESHOLD, RSI_MOMENTUM, ADX_RSI_MODE, MACD_MIN_DIFF_ENABLED,
     EMA_MIN_DIFF_ENABLED, DYNAMIC_SCORE_ENABLED, MIN_SCORE_RANGING, MIN_SCORE_DEFAULT, MIN_ATR_RATIO,
-    MIN_SCORE_TRENDING, TIME_FILTER_ENABLED, AVOID_HOURS_START, AVOID_HOURS_END, MIN_VOLUME_RATIO,
+    MIN_SCORE_TRENDING, TIME_FILTER_ENABLED, TIME_FILTER_TIMEZONE, AVOID_HOURS_START, AVOID_HOURS_END, MIN_VOLUME_RATIO,
     VOLUME_CONFIRMATION_ENABLED, RSI_TRENDING_MODE, RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
     RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT
 )
@@ -402,12 +402,23 @@ def _dynamic_min_score(adx_value: float) -> int:
 
 
 def _is_valid_trading_time():
-    """Check if current time is within valid trading hours"""
+    """Check if current time is within valid trading hours (configured timezone)"""
     if not TIME_FILTER_ENABLED:
         return True
 
-    current_hour = datetime.datetime.utcnow().hour
-    return not (AVOID_HOURS_START <= current_hour < AVOID_HOURS_END)
+    import zoneinfo
+    
+    # Get current time in configured timezone
+    try:
+        target_tz = zoneinfo.ZoneInfo(TIME_FILTER_TIMEZONE)
+        current_time = datetime.datetime.now(target_tz)
+        current_hour = current_time.hour
+        
+        return not (AVOID_HOURS_START <= current_hour < AVOID_HOURS_END)
+    except Exception as e:
+        logger.warning(f"Invalid timezone {TIME_FILTER_TIMEZONE}, falling back to UTC: {e}")
+        current_hour = datetime.datetime.utcnow().hour
+        return not (AVOID_HOURS_START <= current_hour < AVOID_HOURS_END)
 
 
 def _check_volume_confirmation(data):

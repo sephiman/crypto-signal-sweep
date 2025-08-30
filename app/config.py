@@ -11,7 +11,7 @@ REQUIRED_MA_BARS = int(os.getenv("REQUIRED_MA_BARS", 2))
 SEND_UNCONFIRMED = os.getenv("SEND_UNCONFIRMED", "false").lower() == "true"
 DYNAMIC_SCORE_ENABLED = os.getenv("DYNAMIC_SCORE_ENABLED", "true").lower() == "true"
 MIN_SCORE_DEFAULT = int(os.getenv("MIN_SCORE_DEFAULT", 6))
-MIN_SCORE_TRENDING = int(os.getenv("MIN_SCORE_TRENDING", "5"))
+MIN_SCORE_TRENDING = int(os.getenv("MIN_SCORE_TRENDING", 5))
 MIN_SCORE_RANGING = int(os.getenv("MIN_SCORE_RANGING", 4))
 MIN_ATR_RATIO = float(os.getenv("MIN_ATR_RATIO", 0.0030))
 
@@ -21,8 +21,8 @@ ADX_RSI_MODE = os.getenv("ADX_RSI_MODE", "adx").lower()
 
 # RSI Configuration for Ranging Markets (standard oversold/overbought)
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", 14))
-RSI_OVERSOLD = float(os.getenv("RSI_OVERSOLD", 30))
-RSI_OVERBOUGHT = float(os.getenv("RSI_OVERBOUGHT", 70))
+RSI_OVERSOLD = float(os.getenv("RSI_OVERSOLD", 28))
+RSI_OVERBOUGHT = float(os.getenv("RSI_OVERBOUGHT", 72))
 RSI_MOMENTUM = float(os.getenv("RSI_MOMENTUM", 50))
 
 # RSI Configuration for Trending Markets (when ADX_RSI_MODE="adx" and ADX >= threshold)
@@ -32,14 +32,14 @@ RSI_TRENDING_OVERBOUGHT = float(os.getenv("RSI_TRENDING_OVERBOUGHT", 75))  # Mor
 
 # Option 2: Use momentum pullback levels (alternative approach)
 # Set RSI_TRENDING_MODE to "pullback" to look for mild pullbacks in trends instead of extremes
-RSI_TRENDING_MODE = os.getenv("RSI_TRENDING_MODE", "pullback").lower()  # "extreme" or "pullback"
+RSI_TRENDING_MODE = os.getenv("RSI_TRENDING_MODE", "extreme").lower()  # "extreme" or "pullback"
 RSI_TRENDING_PULLBACK_LONG = float(os.getenv("RSI_TRENDING_PULLBACK_LONG", 40))  # Buy pullbacks above this in uptrends
 RSI_TRENDING_PULLBACK_SHORT = float(os.getenv("RSI_TRENDING_PULLBACK_SHORT", 60))  # Sell pullbacks below this in downtrends
 
 MACD_FAST = int(os.getenv("MACD_FAST", 12))
 MACD_SLOW = int(os.getenv("MACD_SLOW", 26))
 MACD_SIGNAL = int(os.getenv("MACD_SIGNAL", 9))
-MACD_MIN_DIFF = float(os.getenv("MACD_MIN_DIFF", 1.0))
+MACD_MIN_DIFF = float(os.getenv("MACD_MIN_DIFF", 0.8))
 MACD_MIN_DIFF_ENABLED = os.getenv("MACD_MIN_DIFF_ENABLED", "true").lower() == "true"
 
 EMA_FAST = int(os.getenv("EMA_FAST", 9))
@@ -64,13 +64,14 @@ ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.2))
 ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 2.4))
 
 # Volume confirmation
-VOLUME_CONFIRMATION_ENABLED = os.getenv("VOLUME_CONFIRMATION_ENABLED", "false").lower() == "true"
-MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "1.0"))
+VOLUME_CONFIRMATION_ENABLED = os.getenv("VOLUME_CONFIRMATION_ENABLED", "true").lower() == "true"
+MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "1.15"))
 
 # Time-based filtering
 TIME_FILTER_ENABLED = os.getenv("TIME_FILTER_ENABLED", "true").lower() == "true"
-AVOID_HOURS_START = int(os.getenv("AVOID_HOURS_START", "2"))
-AVOID_HOURS_END = int(os.getenv("AVOID_HOURS_END", "6"))
+TIME_FILTER_TIMEZONE = os.getenv("TIME_FILTER_TIMEZONE", "Europe/Paris")  # CEST timezone
+AVOID_HOURS_START = int(os.getenv("AVOID_HOURS_START", "0"))
+AVOID_HOURS_END = int(os.getenv("AVOID_HOURS_END", "7"))
 
 def tf_to_minutes(tf: str) -> int:
     m = re.match(r"(\d+)([mh])", tf)
