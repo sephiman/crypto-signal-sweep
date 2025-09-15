@@ -27,8 +27,8 @@ RSI_MOMENTUM = float(os.getenv("RSI_MOMENTUM", 50))
 
 # RSI Configuration for Trending Markets (when ADX_RSI_MODE="adx" and ADX >= threshold)
 # Option 1: Use more extreme levels in trends (default)
-RSI_TRENDING_OVERSOLD = float(os.getenv("RSI_TRENDING_OVERSOLD", 25))  # More extreme for trends
-RSI_TRENDING_OVERBOUGHT = float(os.getenv("RSI_TRENDING_OVERBOUGHT", 75))  # More extreme for trends
+RSI_TRENDING_OVERSOLD = float(os.getenv("RSI_TRENDING_OVERSOLD", 30))  # More extreme for trends
+RSI_TRENDING_OVERBOUGHT = float(os.getenv("RSI_TRENDING_OVERBOUGHT", 70))  # More extreme for trends
 
 # Option 2: Use momentum pullback levels (alternative approach)
 # Set RSI_TRENDING_MODE to "pullback" to look for mild pullbacks in trends instead of extremes
@@ -65,7 +65,7 @@ ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 2.4))
 
 # Volume confirmation
 VOLUME_CONFIRMATION_ENABLED = os.getenv("VOLUME_CONFIRMATION_ENABLED", "true").lower() == "true"
-MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "0.9"))
+MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "0.8"))
 
 # Time-based filtering
 TIME_FILTER_ENABLED = os.getenv("TIME_FILTER_ENABLED", "true").lower() == "true"
