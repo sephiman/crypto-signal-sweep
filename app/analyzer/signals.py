@@ -433,7 +433,7 @@ def _check_volume_confirmation(data):
         return True
 
     volume_ratio = current_volume / avg_volume
-    return volume_ratio >= MIN_VOLUME_RATIO
+    return volume_ratio >= (MIN_VOLUME_RATIO - 0.01)
 
 
 def _get_volume_ratio(data):
