@@ -13,7 +13,7 @@ DYNAMIC_SCORE_ENABLED = os.getenv("DYNAMIC_SCORE_ENABLED", "true").lower() == "t
 MIN_SCORE_DEFAULT = int(os.getenv("MIN_SCORE_DEFAULT", 3))
 MIN_SCORE_TRENDING = int(os.getenv("MIN_SCORE_TRENDING", 3))
 MIN_SCORE_RANGING = int(os.getenv("MIN_SCORE_RANGING", 2))
-MIN_ATR_RATIO = float(os.getenv("MIN_ATR_RATIO", 0.0030))
+MIN_ATR_RATIO = float(os.getenv("MIN_ATR_RATIO", 0.0015))
 
 ADX_PERIOD = int(os.getenv("ADX_PERIOD", 14))
 ADX_THRESHOLD = int(os.getenv("ADX_THRESHOLD", 28))
@@ -64,7 +64,7 @@ ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.2))
 ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 2.4))
 
 # Volume confirmation
-VOLUME_CONFIRMATION_ENABLED = os.getenv("VOLUME_CONFIRMATION_ENABLED", "true").lower() == "true"
+VOLUME_CONFIRMATION_ENABLED = os.getenv("VOLUME_CONFIRMATION_ENABLED", "false").lower() == "true"
 MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "0.8"))
 
 # Time-based filtering
