@@ -6,11 +6,15 @@ from apscheduler.triggers.cron import CronTrigger
 from app.config import TIMEFRAMES, RUN_AT_START
 from app.config import tf_to_minutes
 from app.jobs import run_analysis_job, run_midnight_summary_job, run_hit_polling_job
+from app.exception_notifier import setup_exception_notification
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
+# Initialize exception notification system
+setup_exception_notification()
 
 scheduler = BlockingScheduler()
 

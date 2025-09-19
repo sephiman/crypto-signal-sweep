@@ -10,10 +10,10 @@ TREND_MA_PERIOD = int(os.getenv("TREND_MA_PERIOD", 21))
 REQUIRED_MA_BARS = int(os.getenv("REQUIRED_MA_BARS", 2))
 SEND_UNCONFIRMED = os.getenv("SEND_UNCONFIRMED", "false").lower() == "true"
 DYNAMIC_SCORE_ENABLED = os.getenv("DYNAMIC_SCORE_ENABLED", "true").lower() == "true"
-MIN_SCORE_DEFAULT = int(os.getenv("MIN_SCORE_DEFAULT", 3))
-MIN_SCORE_TRENDING = int(os.getenv("MIN_SCORE_TRENDING", 3))
-MIN_SCORE_RANGING = int(os.getenv("MIN_SCORE_RANGING", 2))
-MIN_ATR_RATIO = float(os.getenv("MIN_ATR_RATIO", 0.0015))
+MIN_SCORE_DEFAULT = int(os.getenv("MIN_SCORE_DEFAULT", 5))
+MIN_SCORE_TRENDING = int(os.getenv("MIN_SCORE_TRENDING", 5))
+MIN_SCORE_RANGING = int(os.getenv("MIN_SCORE_RANGING", 4))
+MIN_ATR_RATIO = float(os.getenv("MIN_ATR_RATIO", 0.005))
 
 ADX_PERIOD = int(os.getenv("ADX_PERIOD", 14))
 ADX_THRESHOLD = int(os.getenv("ADX_THRESHOLD", 28))

@@ -169,67 +169,35 @@ def analyze_market(pairs, timeframe):
 
             min_score = _dynamic_min_score_trending(is_trending if 'is_trending' in locals() else adx >= ADX_THRESHOLD)
 
-            # Determine signal side with detailed failure reasons
-            side = "NONE"
-            none_reason = ""
-            
-            # Check LONG conditions
-            long_conditions_met = True
-            long_fail_reasons = []
-            
-            if long_score < min_score:
-                long_conditions_met = False
-                long_fail_reasons.append(f"LOW_SCORE(L{long_score}<{min_score})")
-            if not rsi_ok_long:
-                long_conditions_met = False
-                long_fail_reasons.append(f"RSI({rsi:.1f})")
-            if not momentum_ok_long:
-                long_conditions_met = False
-                long_fail_reasons.append(f"MACD({diff:.6f})")
-            if not ema_ok_long:
-                long_conditions_met = False
-                long_fail_reasons.append("EMA")
-            if not trend_ok_long:
-                long_conditions_met = False
-                long_fail_reasons.append("TREND")
-            if USE_HIGHER_TF_CONFIRM and not confirm_long:
-                long_conditions_met = False
-                long_fail_reasons.append("HTF")
-            
-            # Check SHORT conditions
-            short_conditions_met = True
-            short_fail_reasons = []
-            
-            if short_score < min_score:
-                short_conditions_met = False
-                short_fail_reasons.append(f"LOW_SCORE(S{short_score}<{min_score})")
-            if not rsi_ok_short:
-                short_conditions_met = False
-                short_fail_reasons.append(f"RSI({rsi:.1f})")
-            if not momentum_ok_short:
-                short_conditions_met = False
-                short_fail_reasons.append(f"MACD({diff:.6f})")
-            if not ema_ok_short:
-                short_conditions_met = False
-                short_fail_reasons.append("EMA")
-            if not trend_ok_short:
-                short_conditions_met = False
-                short_fail_reasons.append("TREND")
-            if USE_HIGHER_TF_CONFIRM and not confirm_short:
-                short_conditions_met = False
-                short_fail_reasons.append("HTF")
-            
-            # Determine final side
-            if long_conditions_met:
+            # Determine signal side based on scoring system only
+            if long_score >= min_score and long_score >= short_score:
                 side = "LONG"
-            elif short_conditions_met:
+            elif short_score >= min_score:
                 side = "SHORT"
             else:
-                # Both failed - determine primary reason
-                if len(long_fail_reasons) <= len(short_fail_reasons):
-                    none_reason = f"LONG_FAIL({','.join(long_fail_reasons)})"
+                side = "NONE"
+                # Provide detailed failure reason
+                long_fails = []
+                short_fails = []
+
+                if not rsi_ok_long: long_fails.append(f"RSI({rsi:.1f})")
+                if not (macd > signal_line): long_fails.append("MACD_DIR")
+                if not momentum_ok_long: long_fails.append(f"MACD_MOM({diff:.6f})")
+                if not ema_ok_long: long_fails.append("EMA")
+                if not trend_ok_long: long_fails.append("TREND")
+                if USE_HIGHER_TF_CONFIRM and not confirm_long: long_fails.append("HTF")
+
+                if not rsi_ok_short: short_fails.append(f"RSI({rsi:.1f})")
+                if not (macd < signal_line): short_fails.append("MACD_DIR")
+                if not momentum_ok_short: short_fails.append(f"MACD_MOM({diff:.6f})")
+                if not ema_ok_short: short_fails.append("EMA")
+                if not trend_ok_short: short_fails.append("TREND")
+                if USE_HIGHER_TF_CONFIRM and not confirm_short: short_fails.append("HTF")
+
+                if long_score >= short_score:
+                    none_reason = f"LONG_FAIL(S{long_score}<{min_score}:{','.join(long_fails)})"
                 else:
-                    none_reason = f"SHORT_FAIL({','.join(short_fail_reasons)})"
+                    none_reason = f"SHORT_FAIL(S{short_score}<{min_score}:{','.join(short_fails)})"
 
             # Determine final status and reason
             if not volume_pass:
