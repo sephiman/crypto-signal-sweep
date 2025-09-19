@@ -3,7 +3,7 @@ import logging
 
 import ccxt
 import pandas as pd
-from ta.momentum import RSIIndicator
+from ta.momentum import RSIIndicator, StochasticOscillator
 from ta.trend import MACD
 from ta.volatility import AverageTrueRange
 
@@ -18,7 +18,7 @@ from app.config import (
     EMA_MIN_DIFF_ENABLED, DYNAMIC_SCORE_ENABLED, MIN_SCORE_RANGING, MIN_SCORE_DEFAULT, MIN_ATR_RATIO,
     MIN_SCORE_TRENDING, TIME_FILTER_ENABLED, TIME_FILTER_TIMEZONE, AVOID_HOURS_START, AVOID_HOURS_END, MIN_VOLUME_RATIO,
     VOLUME_CONFIRMATION_ENABLED, RSI_TRENDING_MODE, RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
-    RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT
+    RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT, STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_OVERSOLD, STOCH_OVERBOUGHT, STOCH_ENABLED
 )
 
 logger = logging.getLogger(__name__)
@@ -74,6 +74,17 @@ def analyze_market(pairs, timeframe):
             adx = ADXIndicator(
                 high=data['high'], low=data['low'], close=data['close'], window=ADX_PERIOD
             ).adx().iloc[-1]
+
+            # Stochastic Oscillator calculation
+            if STOCH_ENABLED:
+                stoch_obj = StochasticOscillator(
+                    high=data['high'], low=data['low'], close=data['close'],
+                    window=STOCH_K_PERIOD, smooth_window=STOCH_D_PERIOD
+                )
+                stoch_k = stoch_obj.stoch().iloc[-1]
+                stoch_d = stoch_obj.stoch_signal().iloc[-1]
+            else:
+                stoch_k = stoch_d = 50  # Neutral values when disabled
 
             # Calculate filter conditions
             volume_pass = not VOLUME_CONFIRMATION_ENABLED or _check_volume_confirmation(data)
@@ -135,6 +146,13 @@ def analyze_market(pairs, timeframe):
             else:
                 trend_ok_long = trend_ok_short = True
 
+            # Stochastic conditions
+            if STOCH_ENABLED:
+                stoch_ok_long = stoch_k < STOCH_OVERSOLD and stoch_d < STOCH_OVERSOLD
+                stoch_ok_short = stoch_k > STOCH_OVERBOUGHT and stoch_d > STOCH_OVERBOUGHT
+            else:
+                stoch_ok_long = stoch_ok_short = True  # Allow signals when disabled
+
             # Higher timeframe confirmation
             if USE_HIGHER_TF_CONFIRM:
                 higher_tf = HIGHER_TF_MAP.get(timeframe)
@@ -152,6 +170,7 @@ def analyze_market(pairs, timeframe):
                 momentum_ok_long,
                 ema_ok_long,
                 trend_ok_long,
+                stoch_ok_long,
                 confirm_long or SEND_UNCONFIRMED
             ]
 
@@ -161,6 +180,7 @@ def analyze_market(pairs, timeframe):
                 momentum_ok_short,
                 ema_ok_short,
                 trend_ok_short,
+                stoch_ok_short,
                 confirm_short or SEND_UNCONFIRMED
             ]
 
@@ -185,6 +205,7 @@ def analyze_market(pairs, timeframe):
                 if not momentum_ok_long: long_fails.append(f"MACD_MOM({diff:.6f})")
                 if not ema_ok_long: long_fails.append("EMA")
                 if not trend_ok_long: long_fails.append("TREND")
+                if STOCH_ENABLED and not stoch_ok_long: long_fails.append(f"STOCH({stoch_k:.1f}/{stoch_d:.1f})")
                 if USE_HIGHER_TF_CONFIRM and not confirm_long: long_fails.append("HTF")
 
                 if not rsi_ok_short: short_fails.append(f"RSI({rsi:.1f})")
@@ -192,6 +213,7 @@ def analyze_market(pairs, timeframe):
                 if not momentum_ok_short: short_fails.append(f"MACD_MOM({diff:.6f})")
                 if not ema_ok_short: short_fails.append("EMA")
                 if not trend_ok_short: short_fails.append("TREND")
+                if STOCH_ENABLED and not stoch_ok_short: short_fails.append(f"STOCH({stoch_k:.1f}/{stoch_d:.1f})")
                 if USE_HIGHER_TF_CONFIRM and not confirm_short: short_fails.append("HTF")
 
                 if long_score >= short_score:
@@ -214,16 +236,20 @@ def analyze_market(pairs, timeframe):
                 result = none_reason if none_reason else "NO_SIGNAL"
 
             # All metrics
+            stoch_info = f"STOCH:{stoch_k:.1f}/{stoch_d:.1f} " if STOCH_ENABLED else ""
+            stoch_gates = f"Stoch:{int(stoch_ok_long)}/{int(stoch_ok_short)} " if STOCH_ENABLED else ""
+
             logger.info(
                 f"{status} | {timeframe} | {pair} | "
                 f"Price:{price:.2f} RSI:{rsi:.1f} ADX:{adx:.1f} MACD:{diff:.4f} "
-                f"EMA:{ema_fast:.2f}/{ema_slow:.2f} ATR:{atr_pct:.3%} VOL:{volume_ratio:.1f}x | "
+                f"EMA:{ema_fast:.2f}/{ema_slow:.2f} {stoch_info}ATR:{atr_pct:.3%} VOL:{volume_ratio:.1f}x | "
                 f"Regime:{'TREND' if adx >= ADX_THRESHOLD else 'RANGE'} "
                 f"Score:L{long_score}/S{short_score}(min:{min_score}) | "
                 f"Gates[L/S]: RSI:{int(rsi_ok_long)}/{int(rsi_ok_short)} "
                 f"MACD:{int(momentum_ok_long)}/{int(momentum_ok_short)} "
                 f"EMA:{int(ema_ok_long)}/{int(ema_ok_short)} "
                 f"Trend:{int(trend_ok_long)}/{int(trend_ok_short)} "
+                f"{stoch_gates}"
                 f"HTF:{int(confirm_long)}/{int(confirm_short)} | "
                 f"Result:{result}"
             )
@@ -242,6 +268,8 @@ def analyze_market(pairs, timeframe):
                 "ema_fast": ema_fast,
                 "ema_slow": ema_slow,
                 "ema_diff": abs(ema_fast - ema_slow),
+                "stoch_k": stoch_k,
+                "stoch_d": stoch_d,
                 "atr": atr,
                 "atr_pct": atr_pct,
                 "volume_ratio": volume_ratio,
@@ -255,6 +283,8 @@ def analyze_market(pairs, timeframe):
                 "ema_ok_short": ema_ok_short,
                 "trend_ok_long": trend_ok_long,
                 "trend_ok_short": trend_ok_short,
+                "stoch_ok_long": stoch_ok_long,
+                "stoch_ok_short": stoch_ok_short,
                 "htf_confirm_long": confirm_long,
                 "htf_confirm_short": confirm_short,
                 "volume_pass": volume_pass,
@@ -314,6 +344,7 @@ def analyze_market(pairs, timeframe):
                 "ema_ok": ema_ok_long if side == "LONG" else ema_ok_short,
                 "macd_ok": (macd > signal_line) if side == "LONG" else (macd < signal_line),
                 "macd_momentum_ok": momentum_ok_long if side == "LONG" else momentum_ok_short,
+                "stoch_ok": stoch_ok_long if side == "LONG" else stoch_ok_short,
                 "rsi": rsi,
                 "adx": adx,
                 "macd": macd,
@@ -322,6 +353,8 @@ def analyze_market(pairs, timeframe):
                 "ema_fast": ema_fast,
                 "ema_slow": ema_slow,
                 "ema_diff": abs(ema_fast - ema_slow),
+                "stoch_k": stoch_k,
+                "stoch_d": stoch_d,
                 "atr": atr,
                 "atr_pct": atr_pct,
                 "regime": "momentum" if adx >= ADX_THRESHOLD else "mean-reversion",

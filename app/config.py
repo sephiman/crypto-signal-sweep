@@ -47,6 +47,13 @@ EMA_SLOW = int(os.getenv("EMA_SLOW", 21))
 EMA_MIN_DIFF = int(os.getenv("EMA_MIN_DIFF", 12))
 EMA_MIN_DIFF_ENABLED = os.getenv("EMA_MIN_DIFF_ENABLED", "true").lower() == "true"
 
+# Stochastic Oscillator Configuration
+STOCH_K_PERIOD = int(os.getenv("STOCH_K_PERIOD", 14))  # %K period
+STOCH_D_PERIOD = int(os.getenv("STOCH_D_PERIOD", 3))   # %D period (smoothing)
+STOCH_OVERSOLD = float(os.getenv("STOCH_OVERSOLD", 20))
+STOCH_OVERBOUGHT = float(os.getenv("STOCH_OVERBOUGHT", 80))
+STOCH_ENABLED = os.getenv("STOCH_ENABLED", "true").lower() == "true"
+
 DB_ENABLED = os.getenv("DB_ENABLED", "false").lower() == "true"
 DB_URL = (
     f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
