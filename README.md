@@ -33,6 +33,7 @@ A sophisticated algorithmic trading signal generator that scans multiple cryptoc
   - **MACD**: Momentum + signal cross + histogram divergence analysis
   - **EMA**: Dynamic separation requirements based on ATR volatility
   - **ADX**: Enhanced trend strength detection (28+ threshold)
+  - **Stochastic Oscillator**: Momentum indicator for overbought/oversold conditions
 - 🎯 **Smart Entry Logic**: Requires multiple confirmation gates for signal generation
 - 📊 **Dynamic Scoring**: Adaptive requirements based on market regime (trending vs ranging)
 

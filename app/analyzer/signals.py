@@ -27,6 +27,46 @@ exchange = ccxt.binance()
 from app.db.tracker import save_market_analysis
 
 
+class TechnicalIndicators:
+    """Container for all calculated technical indicators"""
+    def __init__(self, rsi, macd, signal_line, diff, ema_fast, ema_slow, atr, atr_pct, adx, stoch_k, stoch_d, volume_ratio):
+        self.rsi = rsi
+        self.macd = macd
+        self.signal_line = signal_line
+        self.diff = diff
+        self.ema_fast = ema_fast
+        self.ema_slow = ema_slow
+        self.atr = atr
+        self.atr_pct = atr_pct
+        self.adx = adx
+        self.stoch_k = stoch_k
+        self.stoch_d = stoch_d
+        self.volume_ratio = volume_ratio
+
+
+class MarketConditions:
+    """Container for all market condition checks"""
+    def __init__(self, rsi_ok_long, rsi_ok_short, momentum_ok_long, momentum_ok_short,
+                 ema_ok_long, ema_ok_short, trend_ok_long, trend_ok_short,
+                 stoch_ok_long, stoch_ok_short, confirm_long, confirm_short,
+                 volume_pass, atr_pass, is_trending):
+        self.rsi_ok_long = rsi_ok_long
+        self.rsi_ok_short = rsi_ok_short
+        self.momentum_ok_long = momentum_ok_long
+        self.momentum_ok_short = momentum_ok_short
+        self.ema_ok_long = ema_ok_long
+        self.ema_ok_short = ema_ok_short
+        self.trend_ok_long = trend_ok_long
+        self.trend_ok_short = trend_ok_short
+        self.stoch_ok_long = stoch_ok_long
+        self.stoch_ok_short = stoch_ok_short
+        self.confirm_long = confirm_long
+        self.confirm_short = confirm_short
+        self.volume_pass = volume_pass
+        self.atr_pass = atr_pass
+        self.is_trending = is_trending
+
+
 def analyze_market(pairs, timeframe):
     """
     Market analysis with improved filtering and scoring
@@ -49,319 +89,29 @@ def analyze_market(pairs, timeframe):
             price = _get_last_price(pair)
 
             # Calculate ALL indicators first (always)
-            volume_ratio = _get_volume_ratio(data)
+            indicators = _calculate_technical_indicators(data, price)
 
-            rsi = RSIIndicator(data['close'], window=RSI_PERIOD).rsi().iloc[-1]
-            macd_obj = MACD(
-                close=data['close'],
-                window_slow=MACD_SLOW,
-                window_fast=MACD_FAST,
-                window_sign=MACD_SIGNAL
-            )
-            macd = macd_obj.macd().iloc[-1]
-            signal_line = macd_obj.macd_signal().iloc[-1]
-            diff = macd - signal_line
-
-            ema_fast = data['close'].ewm(span=EMA_FAST).mean().iloc[-1]
-            ema_slow = data['close'].ewm(span=EMA_SLOW).mean().iloc[-1]
-
-            atr = AverageTrueRange(
-                high=data['high'], low=data['low'], close=data['close'], window=ATR_PERIOD
-            ).average_true_range().iloc[-1]
-            atr_pct = atr / price
-
-            from ta.trend import ADXIndicator
-            adx = ADXIndicator(
-                high=data['high'], low=data['low'], close=data['close'], window=ADX_PERIOD
-            ).adx().iloc[-1]
-
-            # Stochastic Oscillator calculation
-            if STOCH_ENABLED:
-                stoch_obj = StochasticOscillator(
-                    high=data['high'], low=data['low'], close=data['close'],
-                    window=STOCH_K_PERIOD, smooth_window=STOCH_D_PERIOD
-                )
-                stoch_k = stoch_obj.stoch().iloc[-1]
-                stoch_d = stoch_obj.stoch_signal().iloc[-1]
-            else:
-                stoch_k = stoch_d = 50  # Neutral values when disabled
-
-            # Calculate filter conditions
-            volume_pass = not VOLUME_CONFIRMATION_ENABLED or _check_volume_confirmation(data)
-            atr_pass = atr_pct >= MIN_ATR_RATIO
-
-            min_ema_separation = atr * 0.5
-
-            # MACD momentum check
-            if MACD_MIN_DIFF_ENABLED:
-                momentum_ok_long = (macd > signal_line) and (diff >= MACD_MIN_DIFF)
-                momentum_ok_short = (macd < signal_line) and (diff <= -MACD_MIN_DIFF)
-            else:
-                momentum_ok_long = macd > signal_line
-                momentum_ok_short = macd < signal_line
-
-            # EMA check
-            if EMA_MIN_DIFF_ENABLED:
-                ema_separation = abs(ema_fast - ema_slow)
-                ema_ok_long = (ema_fast > ema_slow) and (ema_separation >= min_ema_separation)
-                ema_ok_short = (ema_fast < ema_slow) and (ema_separation >= min_ema_separation)
-            else:
-                ema_ok_long = ema_fast > ema_slow
-                ema_ok_short = ema_fast < ema_slow
-
-            # RSI regime logic
-            if ADX_RSI_MODE == "rsi":
-                # Simple mode: always use standard oversold/overbought levels
-                rsi_ok_long = rsi < RSI_OVERSOLD
-                rsi_ok_short = rsi > RSI_OVERBOUGHT
-            else:
-                # ADX-based adaptive mode
-                is_trending = adx >= ADX_THRESHOLD
-
-                if is_trending:
-                    # Market is trending - use trending-specific RSI strategy
-                    if RSI_TRENDING_MODE == "pullback":
-                        # Pullback mode: Look for mild retracements in strong trends
-                        # Long: RSI pulls back but stays above support level
-                        rsi_ok_long = RSI_TRENDING_PULLBACK_LONG < rsi < RSI_MOMENTUM
-                        # Short: RSI pulls back but stays below resistance level
-                        rsi_ok_short = RSI_MOMENTUM < rsi < RSI_TRENDING_PULLBACK_SHORT
-                    else:
-                        # Extreme mode (default): Require even more extreme levels in trends
-                        # This filters out weak signals in strong trends
-                        rsi_ok_long = rsi < RSI_TRENDING_OVERSOLD
-                        rsi_ok_short = rsi > RSI_TRENDING_OVERBOUGHT
-                else:
-                    # Market is ranging - use standard oversold/overbought levels
-                    rsi_ok_long = rsi < RSI_OVERSOLD
-                    rsi_ok_short = rsi > RSI_OVERBOUGHT
-
-            # Trend filter logic
-            if USE_TREND_FILTER:
-                sma = data['close'].rolling(window=TREND_MA_PERIOD).mean()
-                recent_closes = data['close'].iloc[-REQUIRED_MA_BARS:]
-                recent_sma = sma.iloc[-REQUIRED_MA_BARS:]
-                trend_ok_long = (recent_closes > recent_sma).all()
-                trend_ok_short = (recent_closes < recent_sma).all()
-            else:
-                trend_ok_long = trend_ok_short = True
-
-            # Stochastic conditions
-            if STOCH_ENABLED:
-                stoch_ok_long = stoch_k < STOCH_OVERSOLD and stoch_d < STOCH_OVERSOLD
-                stoch_ok_short = stoch_k > STOCH_OVERBOUGHT and stoch_d > STOCH_OVERBOUGHT
-            else:
-                stoch_ok_long = stoch_ok_short = True  # Allow signals when disabled
-
-            # Higher timeframe confirmation
-            if USE_HIGHER_TF_CONFIRM:
-                higher_tf = HIGHER_TF_MAP.get(timeframe)
-                if higher_tf:
-                    confirm_long, confirm_short = _get_htf_confirmation(pair, higher_tf)
-                else:
-                    confirm_long = confirm_short = True
-            else:
-                confirm_long = confirm_short = True
+            # Calculate filter conditions and market conditions
+            conditions = _calculate_market_conditions(data, indicators, timeframe, pair)
 
             # Scoring system
-            long_gates = [
-                rsi_ok_long,
-                macd > signal_line,
-                momentum_ok_long,
-                ema_ok_long,
-                trend_ok_long,
-                stoch_ok_long,
-                confirm_long or SEND_UNCONFIRMED
-            ]
+            long_score, short_score, min_score = _calculate_scores(indicators, conditions)
 
-            short_gates = [
-                rsi_ok_short,
-                macd < signal_line,
-                momentum_ok_short,
-                ema_ok_short,
-                trend_ok_short,
-                stoch_ok_short,
-                confirm_short or SEND_UNCONFIRMED
-            ]
+            # Determine signal side and status
+            side, status, result = _determine_signal_side(long_score, short_score, min_score, conditions, indicators)
 
-            long_score = sum(long_gates)
-            short_score = sum(short_gates)
-
-            min_score = _dynamic_min_score_trending(is_trending if 'is_trending' in locals() else adx >= ADX_THRESHOLD)
-
-            # Determine signal side based on scoring system only
-            if long_score >= min_score and long_score >= short_score:
-                side = "LONG"
-            elif short_score >= min_score:
-                side = "SHORT"
-            else:
-                side = "NONE"
-                # Provide detailed failure reason
-                long_fails = []
-                short_fails = []
-
-                if not rsi_ok_long: long_fails.append(f"RSI({rsi:.1f})")
-                if not (macd > signal_line): long_fails.append("MACD_DIR")
-                if not momentum_ok_long: long_fails.append(f"MACD_MOM({diff:.6f})")
-                if not ema_ok_long: long_fails.append("EMA")
-                if not trend_ok_long: long_fails.append("TREND")
-                if STOCH_ENABLED and not stoch_ok_long: long_fails.append(f"STOCH({stoch_k:.1f}/{stoch_d:.1f})")
-                if USE_HIGHER_TF_CONFIRM and not confirm_long: long_fails.append("HTF")
-
-                if not rsi_ok_short: short_fails.append(f"RSI({rsi:.1f})")
-                if not (macd < signal_line): short_fails.append("MACD_DIR")
-                if not momentum_ok_short: short_fails.append(f"MACD_MOM({diff:.6f})")
-                if not ema_ok_short: short_fails.append("EMA")
-                if not trend_ok_short: short_fails.append("TREND")
-                if STOCH_ENABLED and not stoch_ok_short: short_fails.append(f"STOCH({stoch_k:.1f}/{stoch_d:.1f})")
-                if USE_HIGHER_TF_CONFIRM and not confirm_short: short_fails.append("HTF")
-
-                if long_score >= short_score:
-                    none_reason = f"LONG_FAIL(S{long_score}<{min_score}:{','.join(long_fails)})"
-                else:
-                    none_reason = f"SHORT_FAIL(S{short_score}<{min_score}:{','.join(short_fails)})"
-
-            # Determine final status and reason
-            if not volume_pass:
-                status = "⏭️ SKIP"
-                result = f"LOW_VOL({volume_ratio:.1f}x<{MIN_VOLUME_RATIO}x)"
-            elif not atr_pass:
-                status = "⏭️ SKIP"
-                result = f"LOW_ATR({atr_pct:.3%}<{MIN_ATR_RATIO:.3%})"
-            elif side != "NONE":
-                status = "✅ SIGNAL"
-                result = side
-            else:
-                status = "⏭️ SKIP"
-                result = none_reason if none_reason else "NO_SIGNAL"
-
-            # All metrics
-            stoch_info = f"STOCH:{stoch_k:.1f}/{stoch_d:.1f} " if STOCH_ENABLED else ""
-            stoch_gates = f"Stoch:{int(stoch_ok_long)}/{int(stoch_ok_short)} " if STOCH_ENABLED else ""
-
-            logger.info(
-                f"{status} | {timeframe} | {pair} | "
-                f"Price:{price:.2f} RSI:{rsi:.1f} ADX:{adx:.1f} MACD:{diff:.4f} "
-                f"EMA:{ema_fast:.2f}/{ema_slow:.2f} {stoch_info}ATR:{atr_pct:.3%} VOL:{volume_ratio:.1f}x | "
-                f"Regime:{'TREND' if adx >= ADX_THRESHOLD else 'RANGE'} "
-                f"Score:L{long_score}/S{short_score}(min:{min_score}) | "
-                f"Gates[L/S]: RSI:{int(rsi_ok_long)}/{int(rsi_ok_short)} "
-                f"MACD:{int(momentum_ok_long)}/{int(momentum_ok_short)} "
-                f"EMA:{int(ema_ok_long)}/{int(ema_ok_short)} "
-                f"Trend:{int(trend_ok_long)}/{int(trend_ok_short)} "
-                f"{stoch_gates}"
-                f"HTF:{int(confirm_long)}/{int(confirm_short)} | "
-                f"Result:{result}"
-            )
-
-            # Save market analysis data to database (both signals and non-signals)
-            analysis_data = {
-                "pair": pair,
-                "timeframe": timeframe,
-                "timestamp": datetime.datetime.now(datetime.UTC),
-                "price": price,
-                "rsi": rsi,
-                "adx": adx,
-                "macd": macd,
-                "macd_signal": signal_line,
-                "macd_diff": diff,
-                "ema_fast": ema_fast,
-                "ema_slow": ema_slow,
-                "ema_diff": abs(ema_fast - ema_slow),
-                "stoch_k": stoch_k,
-                "stoch_d": stoch_d,
-                "atr": atr,
-                "atr_pct": atr_pct,
-                "volume_ratio": volume_ratio,
-                "rsi_ok_long": rsi_ok_long,
-                "rsi_ok_short": rsi_ok_short,
-                "macd_ok_long": macd > signal_line,
-                "macd_ok_short": macd < signal_line,
-                "momentum_ok_long": momentum_ok_long,
-                "momentum_ok_short": momentum_ok_short,
-                "ema_ok_long": ema_ok_long,
-                "ema_ok_short": ema_ok_short,
-                "trend_ok_long": trend_ok_long,
-                "trend_ok_short": trend_ok_short,
-                "stoch_ok_long": stoch_ok_long,
-                "stoch_ok_short": stoch_ok_short,
-                "htf_confirm_long": confirm_long,
-                "htf_confirm_short": confirm_short,
-                "volume_pass": volume_pass,
-                "atr_pass": atr_pass,
-                "time_pass": True,  # We already filtered for time above
-                "long_score": long_score,
-                "short_score": short_score,
-                "min_score_required": min_score,
-                "regime": "TREND" if adx >= ADX_THRESHOLD else "RANGE",
-                "is_trending": adx >= ADX_THRESHOLD,
-                "signal_generated": side != "NONE" and volume_pass and atr_pass,
-                "signal_side": side if side != "NONE" and volume_pass and atr_pass else None,
-                "skip_reason": result if not (side != "NONE" and volume_pass and atr_pass) else None
-            }
-            save_market_analysis(analysis_data)
+            # Log analysis and save to database
+            _log_and_save_analysis(pair, timeframe, price, status, result, long_score, short_score,
+                                 min_score, indicators, conditions, side)
 
             # Skip if filters don't pass
-            if not atr_pass or not volume_pass or side == "NONE":
+            if not conditions.atr_pass or not conditions.volume_pass or side == "NONE":
                 continue
 
-            # Generate signal details with dual TP
-            sl, tp1, tp2 = _calculate_sl_tp(price, atr, side, pair)
-
-            # Ensure minimum 2:1 risk-reward ratio for TP2
-            risk = abs(price - sl)
-            reward = abs(tp2 - price)
-
-            if reward / risk < 2.0:
-                if side == "LONG":
-                    tp2 = price + (risk * 2.0)
-                    # Recalculate TP1 as 50% of the new distance to TP2
-                    tp_distance = tp2 - price
-                    tp1 = price + (tp_distance * 0.5)
-                else:
-                    tp2 = price - (risk * 2.0)
-                    # Recalculate TP1 as 50% of the new distance to TP2
-                    tp_distance = price - tp2
-                    tp1 = price - (tp_distance * 0.5)
-
-            signals.append({
-                "pair": pair,
-                "timeframe": timeframe,
-                "side": side,
-                "price": price,
-                "stop_loss": sl,
-                "take_profit_1": tp1,
-                "take_profit_2": tp2,
-                "timestamp": datetime.datetime.now(datetime.UTC),
-                "momentum_ok": momentum_ok_long if side == "LONG" else momentum_ok_short,
-                "trend_confirmed": trend_ok_long if side == "LONG" else trend_ok_short,
-                "higher_tf_confirmed": confirm_long if side == "LONG" else confirm_short,
-                "confirmed": ((trend_ok_long if side == "LONG" else trend_ok_short) and
-                              (confirm_long if side == "LONG" else confirm_short)),
-                "score": long_score if side == "LONG" else short_score,
-                "required_score": min_score,
-                "rsi_ok": rsi_ok_long if side == "LONG" else rsi_ok_short,
-                "ema_ok": ema_ok_long if side == "LONG" else ema_ok_short,
-                "macd_ok": (macd > signal_line) if side == "LONG" else (macd < signal_line),
-                "macd_momentum_ok": momentum_ok_long if side == "LONG" else momentum_ok_short,
-                "stoch_ok": stoch_ok_long if side == "LONG" else stoch_ok_short,
-                "rsi": rsi,
-                "adx": adx,
-                "macd": macd,
-                "macd_signal": signal_line,
-                "macd_diff": diff,
-                "ema_fast": ema_fast,
-                "ema_slow": ema_slow,
-                "ema_diff": abs(ema_fast - ema_slow),
-                "stoch_k": stoch_k,
-                "stoch_d": stoch_d,
-                "atr": atr,
-                "atr_pct": atr_pct,
-                "regime": "momentum" if adx >= ADX_THRESHOLD else "mean-reversion",
-                "htf_used": USE_HIGHER_TF_CONFIRM,
-                "volume_ratio": volume_ratio,
-                "confidence": "HIGH" if long_score >= min_score + 1 or short_score >= min_score + 1 else "MEDIUM"
-            })
+            # Generate and add signal
+            signal = _generate_signal_details(pair, timeframe, side, price, indicators, conditions,
+                                            long_score, short_score, min_score)
+            signals.append(signal)
 
         except Exception as e:
             logger.error(f"ERROR | {timeframe} | {pair} | Exception: {e}")
@@ -495,17 +245,351 @@ def _calculate_sl_tp(price, atr, side, pair):
     if side == "LONG":
         sl = price - (atr * sl_mult)
         tp2 = price + (atr * tp_mult)  # Full TP (original level)
-        
+
         # Calculate TP1 at 50% of the distance to TP2 for partial profit
         tp_distance = tp2 - price
         tp1 = price + (tp_distance * 0.5)
-        
+
     else:
         sl = price + (atr * sl_mult)
         tp2 = price - (atr * tp_mult)  # Full TP (original level)
-        
+
         # Calculate TP1 at 50% of the distance to TP2 for partial profit
         tp_distance = price - tp2
         tp1 = price - (tp_distance * 0.5)
 
     return sl, tp1, tp2
+
+
+def _calculate_technical_indicators(data, price):
+    """Calculate all technical indicators"""
+    volume_ratio = _get_volume_ratio(data)
+
+    rsi = RSIIndicator(data['close'], window=RSI_PERIOD).rsi().iloc[-1]
+    macd_obj = MACD(
+        close=data['close'],
+        window_slow=MACD_SLOW,
+        window_fast=MACD_FAST,
+        window_sign=MACD_SIGNAL
+    )
+    macd = macd_obj.macd().iloc[-1]
+    signal_line = macd_obj.macd_signal().iloc[-1]
+    diff = macd - signal_line
+
+    ema_fast = data['close'].ewm(span=EMA_FAST).mean().iloc[-1]
+    ema_slow = data['close'].ewm(span=EMA_SLOW).mean().iloc[-1]
+
+    atr = AverageTrueRange(
+        high=data['high'], low=data['low'], close=data['close'], window=ATR_PERIOD
+    ).average_true_range().iloc[-1]
+    atr_pct = atr / price
+
+    from ta.trend import ADXIndicator
+    adx = ADXIndicator(
+        high=data['high'], low=data['low'], close=data['close'], window=ADX_PERIOD
+    ).adx().iloc[-1]
+
+    # Stochastic Oscillator calculation
+    if STOCH_ENABLED:
+        stoch_obj = StochasticOscillator(
+            high=data['high'], low=data['low'], close=data['close'],
+            window=STOCH_K_PERIOD, smooth_window=STOCH_D_PERIOD
+        )
+        stoch_k = stoch_obj.stoch().iloc[-1]
+        stoch_d = stoch_obj.stoch_signal().iloc[-1]
+    else:
+        stoch_k = stoch_d = 50  # Neutral values when disabled
+
+    return TechnicalIndicators(rsi, macd, signal_line, diff, ema_fast, ema_slow,
+                             atr, atr_pct, adx, stoch_k, stoch_d, volume_ratio)
+
+
+def _calculate_market_conditions(data, indicators, timeframe, pair):
+    """Calculate all market conditions and filters"""
+    volume_pass = not VOLUME_CONFIRMATION_ENABLED or _check_volume_confirmation(data)
+    atr_pass = indicators.atr_pct >= MIN_ATR_RATIO
+
+    min_ema_separation = indicators.atr * 0.5
+
+    # MACD momentum check
+    if MACD_MIN_DIFF_ENABLED:
+        momentum_ok_long = (indicators.macd > indicators.signal_line) and (indicators.diff >= MACD_MIN_DIFF)
+        momentum_ok_short = (indicators.macd < indicators.signal_line) and (indicators.diff <= -MACD_MIN_DIFF)
+    else:
+        momentum_ok_long = indicators.macd > indicators.signal_line
+        momentum_ok_short = indicators.macd < indicators.signal_line
+
+    # EMA check
+    if EMA_MIN_DIFF_ENABLED:
+        ema_separation = abs(indicators.ema_fast - indicators.ema_slow)
+        ema_ok_long = (indicators.ema_fast > indicators.ema_slow) and (ema_separation >= min_ema_separation)
+        ema_ok_short = (indicators.ema_fast < indicators.ema_slow) and (ema_separation >= min_ema_separation)
+    else:
+        ema_ok_long = indicators.ema_fast > indicators.ema_slow
+        ema_ok_short = indicators.ema_fast < indicators.ema_slow
+
+    # RSI regime logic
+    is_trending = indicators.adx >= ADX_THRESHOLD
+    if ADX_RSI_MODE == "rsi":
+        # Simple mode: always use standard oversold/overbought levels
+        rsi_ok_long = indicators.rsi < RSI_OVERSOLD
+        rsi_ok_short = indicators.rsi > RSI_OVERBOUGHT
+    else:
+        # ADX-based adaptive mode
+        if is_trending:
+            # Market is trending - use trending-specific RSI strategy
+            if RSI_TRENDING_MODE == "pullback":
+                # Pullback mode: Look for mild retracements in strong trends
+                rsi_ok_long = RSI_TRENDING_PULLBACK_LONG < indicators.rsi < RSI_MOMENTUM
+                rsi_ok_short = RSI_MOMENTUM < indicators.rsi < RSI_TRENDING_PULLBACK_SHORT
+            else:
+                # Extreme mode (default): Require even more extreme levels in trends
+                rsi_ok_long = indicators.rsi < RSI_TRENDING_OVERSOLD
+                rsi_ok_short = indicators.rsi > RSI_TRENDING_OVERBOUGHT
+        else:
+            # Market is ranging - use standard oversold/overbought levels
+            rsi_ok_long = indicators.rsi < RSI_OVERSOLD
+            rsi_ok_short = indicators.rsi > RSI_OVERBOUGHT
+
+    # Trend filter logic
+    if USE_TREND_FILTER:
+        sma = data['close'].rolling(window=TREND_MA_PERIOD).mean()
+        recent_closes = data['close'].iloc[-REQUIRED_MA_BARS:]
+        recent_sma = sma.iloc[-REQUIRED_MA_BARS:]
+        trend_ok_long = (recent_closes > recent_sma).all()
+        trend_ok_short = (recent_closes < recent_sma).all()
+    else:
+        trend_ok_long = trend_ok_short = True
+
+    # Stochastic conditions
+    if STOCH_ENABLED:
+        stoch_ok_long = indicators.stoch_k < STOCH_OVERSOLD and indicators.stoch_d < STOCH_OVERSOLD
+        stoch_ok_short = indicators.stoch_k > STOCH_OVERBOUGHT and indicators.stoch_d > STOCH_OVERBOUGHT
+    else:
+        stoch_ok_long = stoch_ok_short = True  # Allow signals when disabled
+
+    # Higher timeframe confirmation
+    if USE_HIGHER_TF_CONFIRM:
+        higher_tf = HIGHER_TF_MAP.get(timeframe)
+        if higher_tf:
+            confirm_long, confirm_short = _get_htf_confirmation(pair, higher_tf)
+        else:
+            confirm_long = confirm_short = True
+    else:
+        confirm_long = confirm_short = True
+
+    return MarketConditions(rsi_ok_long, rsi_ok_short, momentum_ok_long, momentum_ok_short,
+                          ema_ok_long, ema_ok_short, trend_ok_long, trend_ok_short,
+                          stoch_ok_long, stoch_ok_short, confirm_long, confirm_short,
+                          volume_pass, atr_pass, is_trending)
+
+
+def _calculate_scores(indicators, conditions):
+    """Calculate scoring system for long and short signals"""
+    long_gates = [
+        conditions.rsi_ok_long,
+        indicators.macd > indicators.signal_line,
+        conditions.momentum_ok_long,
+        conditions.ema_ok_long,
+        conditions.trend_ok_long,
+        conditions.stoch_ok_long,
+        conditions.confirm_long or SEND_UNCONFIRMED
+    ]
+
+    short_gates = [
+        conditions.rsi_ok_short,
+        indicators.macd < indicators.signal_line,
+        conditions.momentum_ok_short,
+        conditions.ema_ok_short,
+        conditions.trend_ok_short,
+        conditions.stoch_ok_short,
+        conditions.confirm_short or SEND_UNCONFIRMED
+    ]
+
+    long_score = sum(long_gates)
+    short_score = sum(short_gates)
+    min_score = _dynamic_min_score_trending(conditions.is_trending)
+
+    return long_score, short_score, min_score
+
+
+def _determine_signal_side(long_score, short_score, min_score, conditions, indicators):
+    """Determine signal side and status based on scores and conditions"""
+    # Determine signal side based on scoring system only
+    if long_score >= min_score and long_score >= short_score:
+        side = "LONG"
+    elif short_score >= min_score:
+        side = "SHORT"
+    else:
+        side = "NONE"
+        # Provide detailed failure reason
+        long_fails = []
+        short_fails = []
+
+        if not conditions.rsi_ok_long: long_fails.append(f"RSI({indicators.rsi:.1f})")
+        if not (indicators.macd > indicators.signal_line): long_fails.append("MACD_DIR")
+        if not conditions.momentum_ok_long: long_fails.append(f"MACD_MOM({indicators.diff:.6f})")
+        if not conditions.ema_ok_long: long_fails.append("EMA")
+        if not conditions.trend_ok_long: long_fails.append("TREND")
+        if STOCH_ENABLED and not conditions.stoch_ok_long: long_fails.append(f"STOCH({indicators.stoch_k:.1f}/{indicators.stoch_d:.1f})")
+        if USE_HIGHER_TF_CONFIRM and not conditions.confirm_long: long_fails.append("HTF")
+
+        if not conditions.rsi_ok_short: short_fails.append(f"RSI({indicators.rsi:.1f})")
+        if not (indicators.macd < indicators.signal_line): short_fails.append("MACD_DIR")
+        if not conditions.momentum_ok_short: short_fails.append(f"MACD_MOM({indicators.diff:.6f})")
+        if not conditions.ema_ok_short: short_fails.append("EMA")
+        if not conditions.trend_ok_short: short_fails.append("TREND")
+        if STOCH_ENABLED and not conditions.stoch_ok_short: short_fails.append(f"STOCH({indicators.stoch_k:.1f}/{indicators.stoch_d:.1f})")
+        if USE_HIGHER_TF_CONFIRM and not conditions.confirm_short: short_fails.append("HTF")
+
+        if long_score >= short_score:
+            none_reason = f"LONG_FAIL(S{long_score}<{min_score}:{','.join(long_fails)})"
+        else:
+            none_reason = f"SHORT_FAIL(S{short_score}<{min_score}:{','.join(short_fails)})"
+
+    # Determine final status and reason
+    if not conditions.volume_pass:
+        status = "⏭️ SKIP"
+        result = f"LOW_VOL({indicators.volume_ratio:.1f}x<{MIN_VOLUME_RATIO}x)"
+    elif not conditions.atr_pass:
+        status = "⏭️ SKIP"
+        result = f"LOW_ATR({indicators.atr_pct:.3%}<{MIN_ATR_RATIO:.3%})"
+    elif side != "NONE":
+        status = "✅ SIGNAL"
+        result = side
+    else:
+        status = "⏭️ SKIP"
+        result = none_reason if 'none_reason' in locals() else "NO_SIGNAL"
+
+    return side, status, result
+
+
+def _log_and_save_analysis(pair, timeframe, price, status, result, long_score, short_score,
+                         min_score, indicators, conditions, side):
+    """Log analysis results and save to database"""
+    # All metrics
+    stoch_info = f"STOCH:{indicators.stoch_k:.1f}/{indicators.stoch_d:.1f} " if STOCH_ENABLED else ""
+    stoch_gates = f"Stoch:{int(conditions.stoch_ok_long)}/{int(conditions.stoch_ok_short)} " if STOCH_ENABLED else ""
+
+    logger.info(
+        f"{status} | {timeframe} | {pair} | "
+        f"Price:{price:.2f} RSI:{indicators.rsi:.1f} ADX:{indicators.adx:.1f} MACD:{indicators.diff:.4f} "
+        f"EMA:{indicators.ema_fast:.2f}/{indicators.ema_slow:.2f} {stoch_info}ATR:{indicators.atr_pct:.3%} VOL:{indicators.volume_ratio:.1f}x | "
+        f"Regime:{'TREND' if indicators.adx >= ADX_THRESHOLD else 'RANGE'} "
+        f"Score:L{long_score}/S{short_score}(min:{min_score}) | "
+        f"Gates[L/S]: RSI:{int(conditions.rsi_ok_long)}/{int(conditions.rsi_ok_short)} "
+        f"MACD:{int(conditions.momentum_ok_long)}/{int(conditions.momentum_ok_short)} "
+        f"EMA:{int(conditions.ema_ok_long)}/{int(conditions.ema_ok_short)} "
+        f"Trend:{int(conditions.trend_ok_long)}/{int(conditions.trend_ok_short)} "
+        f"{stoch_gates}"
+        f"HTF:{int(conditions.confirm_long)}/{int(conditions.confirm_short)} | "
+        f"Result:{result}"
+    )
+
+    # Save market analysis data to database (both signals and non-signals)
+    analysis_data = {
+        "pair": pair,
+        "timeframe": timeframe,
+        "timestamp": datetime.datetime.now(datetime.UTC),
+        "price": price,
+        "rsi": indicators.rsi,
+        "adx": indicators.adx,
+        "macd": indicators.macd,
+        "macd_signal": indicators.signal_line,
+        "macd_diff": indicators.diff,
+        "ema_fast": indicators.ema_fast,
+        "ema_slow": indicators.ema_slow,
+        "ema_diff": abs(indicators.ema_fast - indicators.ema_slow),
+        "stoch_k": indicators.stoch_k,
+        "stoch_d": indicators.stoch_d,
+        "atr": indicators.atr,
+        "atr_pct": indicators.atr_pct,
+        "volume_ratio": indicators.volume_ratio,
+        "rsi_ok_long": conditions.rsi_ok_long,
+        "rsi_ok_short": conditions.rsi_ok_short,
+        "macd_ok_long": indicators.macd > indicators.signal_line,
+        "macd_ok_short": indicators.macd < indicators.signal_line,
+        "momentum_ok_long": conditions.momentum_ok_long,
+        "momentum_ok_short": conditions.momentum_ok_short,
+        "ema_ok_long": conditions.ema_ok_long,
+        "ema_ok_short": conditions.ema_ok_short,
+        "trend_ok_long": conditions.trend_ok_long,
+        "trend_ok_short": conditions.trend_ok_short,
+        "stoch_ok_long": conditions.stoch_ok_long,
+        "stoch_ok_short": conditions.stoch_ok_short,
+        "htf_confirm_long": conditions.confirm_long,
+        "htf_confirm_short": conditions.confirm_short,
+        "volume_pass": conditions.volume_pass,
+        "atr_pass": conditions.atr_pass,
+        "time_pass": True,  # We already filtered for time above
+        "long_score": long_score,
+        "short_score": short_score,
+        "min_score_required": min_score,
+        "regime": "TREND" if indicators.adx >= ADX_THRESHOLD else "RANGE",
+        "is_trending": indicators.adx >= ADX_THRESHOLD,
+        "signal_generated": side != "NONE" and conditions.volume_pass and conditions.atr_pass,
+        "signal_side": side if side != "NONE" and conditions.volume_pass and conditions.atr_pass else None,
+        "skip_reason": result if not (side != "NONE" and conditions.volume_pass and conditions.atr_pass) else None
+    }
+    save_market_analysis(analysis_data)
+
+
+def _generate_signal_details(pair, timeframe, side, price, indicators, conditions,
+                           long_score, short_score, min_score):
+    """Generate signal details with dual TP"""
+    sl, tp1, tp2 = _calculate_sl_tp(price, indicators.atr, side, pair)
+
+    # Ensure minimum 2:1 risk-reward ratio for TP2
+    risk = abs(price - sl)
+    reward = abs(tp2 - price)
+
+    if reward / risk < 2.0:
+        if side == "LONG":
+            tp2 = price + (risk * 2.0)
+            # Recalculate TP1 as 50% of the new distance to TP2
+            tp_distance = tp2 - price
+            tp1 = price + (tp_distance * 0.5)
+        else:
+            tp2 = price - (risk * 2.0)
+            # Recalculate TP1 as 50% of the new distance to TP2
+            tp_distance = price - tp2
+            tp1 = price - (tp_distance * 0.5)
+
+    return {
+        "pair": pair,
+        "timeframe": timeframe,
+        "side": side,
+        "price": price,
+        "stop_loss": sl,
+        "take_profit_1": tp1,
+        "take_profit_2": tp2,
+        "timestamp": datetime.datetime.now(datetime.UTC),
+        "momentum_ok": conditions.momentum_ok_long if side == "LONG" else conditions.momentum_ok_short,
+        "trend_confirmed": conditions.trend_ok_long if side == "LONG" else conditions.trend_ok_short,
+        "higher_tf_confirmed": conditions.confirm_long if side == "LONG" else conditions.confirm_short,
+        "confirmed": ((conditions.trend_ok_long if side == "LONG" else conditions.trend_ok_short) and
+                      (conditions.confirm_long if side == "LONG" else conditions.confirm_short)),
+        "score": long_score if side == "LONG" else short_score,
+        "required_score": min_score,
+        "rsi_ok": conditions.rsi_ok_long if side == "LONG" else conditions.rsi_ok_short,
+        "ema_ok": conditions.ema_ok_long if side == "LONG" else conditions.ema_ok_short,
+        "macd_ok": (indicators.macd > indicators.signal_line) if side == "LONG" else (indicators.macd < indicators.signal_line),
+        "macd_momentum_ok": conditions.momentum_ok_long if side == "LONG" else conditions.momentum_ok_short,
+        "stoch_ok": conditions.stoch_ok_long if side == "LONG" else conditions.stoch_ok_short,
+        "rsi": indicators.rsi,
+        "adx": indicators.adx,
+        "macd": indicators.macd,
+        "macd_signal": indicators.signal_line,
+        "macd_diff": indicators.diff,
+        "ema_fast": indicators.ema_fast,
+        "ema_slow": indicators.ema_slow,
+        "ema_diff": abs(indicators.ema_fast - indicators.ema_slow),
+        "stoch_k": indicators.stoch_k,
+        "stoch_d": indicators.stoch_d,
+        "atr": indicators.atr,
+        "atr_pct": indicators.atr_pct,
+        "regime": "momentum" if indicators.adx >= ADX_THRESHOLD else "mean-reversion",
+        "htf_used": USE_HIGHER_TF_CONFIRM,
+        "volume_ratio": indicators.volume_ratio,
+        "confidence": "HIGH" if long_score >= min_score + 1 or short_score >= min_score + 1 else "MEDIUM"
+    }
