@@ -17,7 +17,7 @@ def run_analysis_job(timeframe):
     try:
         signals = analyze_market(PAIRS, timeframe)
 
-        cooldown_mins = tf_to_minutes(timeframe) * 2 + 1
+        cooldown_mins = tf_to_minutes(timeframe) * 4 + 1
 
         with Session(engine) as session:
             to_alert = []
