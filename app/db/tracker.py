@@ -53,6 +53,106 @@ def save_signal(signal: Dict):
         logger.error(f"DB error saving signal: {e}")
 
 
+def _get_price_extremes(ohlcv):
+    """Extract price extremes from OHLCV data."""
+    highs = [c[2] for c in ohlcv]
+    lows = [c[3] for c in ohlcv]
+    return max(highs), min(lows)
+
+
+def _check_tp1_hit(signal, high, low):
+    """Check if TP1 is hit for a signal."""
+    if signal.side == "LONG":
+        return high >= signal.take_profit_1
+    else:  # SHORT
+        return low <= signal.take_profit_1
+
+
+def _check_tp2_hit(signal, high, low):
+    """Check if TP2 is hit for a signal."""
+    if signal.side == "LONG":
+        return high >= signal.take_profit_2
+    else:  # SHORT
+        return low <= signal.take_profit_2
+
+
+def _check_stop_loss_hit(signal, high, low):
+    """Check if original stop loss is hit."""
+    if signal.side == "LONG":
+        return low <= signal.stop_loss
+    else:  # SHORT
+        return high >= signal.stop_loss
+
+
+def _check_breakeven_hit(signal, high, low):
+    """Check if breakeven stop loss (entry price) is hit."""
+    if signal.side == "LONG":
+        return low <= signal.price
+    else:  # SHORT
+        return high >= signal.price
+
+
+def _create_update_record(signal, current_price, hit_type, now, action):
+    """Create an update record for signal status changes."""
+    return {
+        "pair": signal.pair,
+        "timeframe": signal.timeframe,
+        "side": signal.side,
+        "price": current_price,
+        "hit": hit_type,
+        "hit_timestamp": now,
+        "action": action
+    }
+
+
+def _handle_pending_signal(signal, high, low, current_price, now):
+    """Handle a signal in PENDING status."""
+    update = None
+
+    # Check TP1 first (higher priority)
+    if _check_tp1_hit(signal, high, low):
+        signal.hit = "TP1_HIT"
+        signal.sl_moved_to_be = True
+        signal.hit_timestamp = now
+        action = f"TP1 hit at {signal.take_profit_1:.6f}, SL moved to breakeven at {signal.price:.6f}"
+        update = _create_update_record(signal, current_price, "TP1_HIT", now, action)
+        logger.info(
+            f"TP1 HIT: {signal.pair} {signal.side} - TP1: {signal.take_profit_1:.6f}, SL moved to BE: {signal.price:.6f}")
+
+    # Check original SL (only if TP1 not hit)
+    elif _check_stop_loss_hit(signal, high, low):
+        signal.hit = "FAILURE"
+        signal.hit_timestamp = now
+        action = f"Stop Loss hit at {signal.stop_loss:.6f}"
+        update = _create_update_record(signal, current_price, "FAILURE", now, action)
+        logger.info(f"SL HIT: {signal.pair} {signal.side} - SL: {signal.stop_loss:.6f}")
+
+    return update
+
+
+def _handle_tp1_hit_signal(signal, high, low, current_price, now):
+    """Handle a signal that already hit TP1."""
+    update = None
+
+    # Check TP2 first (higher priority)
+    if _check_tp2_hit(signal, high, low):
+        signal.hit = "SUCCESS"
+        signal.hit_timestamp = now
+        action = f"TP2 hit at {signal.take_profit_2:.6f} (Full profit)"
+        update = _create_update_record(signal, current_price, "SUCCESS", now, action)
+        logger.info(f"TP2 HIT: {signal.pair} {signal.side} - TP2: {signal.take_profit_2:.6f}")
+
+    # Check breakeven SL (only if TP2 not hit)
+    elif _check_breakeven_hit(signal, high, low):
+        signal.hit = "BREAKEVEN"
+        signal.hit_timestamp = now
+        action = f"Breakeven SL hit at {signal.price:.6f} (Partial profit secured)"
+        update = _create_update_record(signal, current_price, "BREAKEVEN", now, action)
+        logger.info(f"BREAKEVEN: {signal.pair} {signal.side} - BE SL: {signal.price:.6f}")
+
+    return update
+
+
 def check_hit_signals():
     """
     Signal tracking with dual TP levels and SL-to-breakeven management.
@@ -69,116 +169,34 @@ def check_hit_signals():
         active_signals = session.query(Signal).filter(
             Signal.hit.in_(["PENDING", "TP1_HIT"])
         ).all()
-        
+
         if not active_signals:
             return []
 
-        for s in active_signals:
+        for signal in active_signals:
             try:
-                since = int(s.timestamp.timestamp() * 1000)
-                ohlcv = exchange.fetch_ohlcv(s.pair, "1m", since=since)
+                # Fetch price data since signal was created
+                since = int(signal.timestamp.timestamp() * 1000)
+                ohlcv = exchange.fetch_ohlcv(signal.pair, "1m", since=since)
 
                 if not ohlcv:
                     continue
 
-                highs = [c[2] for c in ohlcv]
-                lows = [c[3] for c in ohlcv]
-                
-                # Current effective stop loss (might be moved to breakeven)
-                current_sl = s.price if s.sl_moved_to_be else s.stop_loss
+                # Extract price extremes
+                high, low = _get_price_extremes(ohlcv)
+                current_price = ohlcv[-1][4]  # Current close price
 
-                if s.hit == "PENDING":
-                    # Check if TP1 is hit first
-                    tp1_hit = False
-                    if s.side == "LONG" and max(highs) >= s.take_profit_1:
-                        tp1_hit = True
-                    elif s.side == "SHORT" and min(lows) <= s.take_profit_1:
-                        tp1_hit = True
+                # Handle signal based on its current status
+                if signal.hit == "PENDING":
+                    update = _handle_pending_signal(signal, high, low, current_price, now)
+                elif signal.hit == "TP1_HIT":
+                    update = _handle_tp1_hit_signal(signal, high, low, current_price, now)
 
-                    if tp1_hit:
-                        # Move to TP1_HIT state and set SL to breakeven
-                        s.hit = "TP1_HIT"
-                        s.sl_moved_to_be = True
-                        s.hit_timestamp = now
-                        updated.append({
-                            "pair": s.pair,
-                            "timeframe": s.timeframe,
-                            "side": s.side,
-                            "price": ohlcv[-1][4],
-                            "hit": "TP1_HIT",
-                            "hit_timestamp": now,
-                            "action": f"TP1 hit at {s.take_profit_1:.6f}, SL moved to breakeven at {s.price:.6f}"
-                        })
-                        logger.info(f"TP1 HIT: {s.pair} {s.side} - TP1: {s.take_profit_1:.6f}, SL moved to BE: {s.price:.6f}")
-                        continue
-
-                    # Check if original SL is hit (before TP1)
-                    sl_hit = False
-                    if s.side == "LONG" and min(lows) <= s.stop_loss:
-                        sl_hit = True
-                    elif s.side == "SHORT" and max(highs) >= s.stop_loss:
-                        sl_hit = True
-
-                    if sl_hit:
-                        s.hit = "FAILURE"
-                        s.hit_timestamp = now
-                        updated.append({
-                            "pair": s.pair,
-                            "timeframe": s.timeframe,
-                            "side": s.side,
-                            "price": ohlcv[-1][4],
-                            "hit": "FAILURE",
-                            "hit_timestamp": now,
-                            "action": f"Stop Loss hit at {s.stop_loss:.6f}"
-                        })
-                        logger.info(f"SL HIT: {s.pair} {s.side} - SL: {s.stop_loss:.6f}")
-
-                elif s.hit == "TP1_HIT":
-                    # Already hit TP1, now check for TP2 or breakeven SL
-                    tp2_hit = False
-                    if s.side == "LONG" and max(highs) >= s.take_profit_2:
-                        tp2_hit = True
-                    elif s.side == "SHORT" and min(lows) <= s.take_profit_2:
-                        tp2_hit = True
-
-                    if tp2_hit:
-                        s.hit = "SUCCESS"
-                        s.hit_timestamp = now
-                        updated.append({
-                            "pair": s.pair,
-                            "timeframe": s.timeframe,
-                            "side": s.side,
-                            "price": ohlcv[-1][4],
-                            "hit": "SUCCESS",
-                            "hit_timestamp": now,
-                            "action": f"TP2 hit at {s.take_profit_2:.6f} (Full profit)"
-                        })
-                        logger.info(f"TP2 HIT: {s.pair} {s.side} - TP2: {s.take_profit_2:.6f}")
-                        continue
-
-                    # Check if breakeven SL is hit
-                    be_sl_hit = False
-                    if s.side == "LONG" and min(lows) <= s.price:
-                        be_sl_hit = True
-                    elif s.side == "SHORT" and max(highs) >= s.price:
-                        be_sl_hit = True
-
-                    if be_sl_hit:
-                        s.hit = "BREAKEVEN"
-                        s.hit_timestamp = now
-                        updated.append({
-                            "pair": s.pair,
-                            "timeframe": s.timeframe,
-                            "side": s.side,
-                            "price": ohlcv[-1][4],
-                            "hit": "BREAKEVEN",
-                            "hit_timestamp": now,
-                            "action": f"Breakeven SL hit at {s.price:.6f} (Partial profit secured)"
-                        })
-                        logger.info(f"BREAKEVEN: {s.pair} {s.side} - BE SL: {s.price:.6f}")
+                if update:
+                    updated.append(update)
 
             except Exception as e:
-                logger.error(f"Failed 1m candle check for {s.pair}: {e}")
+                logger.error(f"Failed 1m candle check for {signal.pair}: {e}")
 
         session.commit()
 
@@ -197,28 +215,28 @@ def summarize_and_notify():
         ("30d", datetime.timedelta(days=30)),
     ]
     lines = ["📊 *Trading Performance Summary*"]
-    
+
     with Session(engine) as session:
         for label, delta in periods:
             cutoff = now - delta
-            
+
             # Get all completed signals with their data
             completed_signals = session.query(Signal) \
                 .filter(Signal.hit_timestamp != None,
                         Signal.hit_timestamp > cutoff,
                         Signal.hit.in_(["SUCCESS", "FAILURE", "BREAKEVEN"])) \
                 .all()
-            
+
             if not completed_signals:
                 lines.append(f"{label}: No completed trades")
                 continue
-            
+
             total = len(completed_signals)
             total_pnl = 0.0
             full_success = 0
             partial_success = 0
             failures = 0
-            
+
             for signal in completed_signals:
                 if signal.hit == "SUCCESS":
                     # Full TP2 hit - calculate profit percentage
@@ -226,39 +244,39 @@ def summarize_and_notify():
                         profit_pct = (signal.take_profit_2 - signal.price) / signal.price * 100
                     else:  # SHORT
                         profit_pct = (signal.price - signal.take_profit_2) / signal.price * 100
-                    
+
                     total_pnl += profit_pct
                     full_success += 1
-                    
+
                 elif signal.hit == "BREAKEVEN":
                     # TP1 hit then returned to breakeven - calculate partial profit percentage
                     if signal.side == "LONG":
                         tp1_profit_pct = (signal.take_profit_1 - signal.price) / signal.price * 100
                     else:  # SHORT  
                         tp1_profit_pct = (signal.price - signal.take_profit_1) / signal.price * 100
-                    
+
                     # Partial profit (50% position closed at TP1) minus spread cost (0.1% on remaining 50%)
                     partial_pnl = (tp1_profit_pct * 0.5) - (0.1 * 0.5)  # 50% at TP1 profit, 50% at -0.1% spread
                     total_pnl += partial_pnl
                     partial_success += 1
-                    
+
                 elif signal.hit == "FAILURE":
                     # Stop loss hit - calculate loss percentage
                     if signal.side == "LONG":
                         loss_pct = (signal.stop_loss - signal.price) / signal.price * 100
                     else:  # SHORT
                         loss_pct = (signal.price - signal.stop_loss) / signal.price * 100
-                    
+
                     total_pnl += loss_pct
                     failures += 1
-            
+
             # Calculate metrics
             win_rate = ((full_success + partial_success) / total * 100) if total else 0.0
             avg_pnl_per_trade = total_pnl / total if total else 0.0
-            
+
             # Format the summary line
             pnl_color = "🟢" if total_pnl > 0 else "🔴" if total_pnl < 0 else "⚪"
-            
+
             lines.append(
                 f"{label}: {full_success}🎯/{partial_success}⚖️/{failures}❌ "
                 f"({win_rate:.1f}% wins)"
