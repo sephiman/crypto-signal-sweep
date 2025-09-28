@@ -81,8 +81,26 @@ def get_latest_market_analysis() -> List[PairSummary]:
     available_timeframes = TIMEFRAMES
     summaries = []
 
-    # Data freshness cutoff (2 hours)
-    cutoff_time = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=2)
+    # Calculate dynamic cutoff based on longest timeframe
+    # Add buffer time (1.5x the longest timeframe) to ensure we have recent data
+    def tf_to_hours(tf: str) -> float:
+        """Convert timeframe string to hours."""
+        if tf.endswith('m'):
+            return int(tf[:-1]) / 60.0
+        elif tf.endswith('h'):
+            return int(tf[:-1])
+        elif tf.endswith('d'):
+            return int(tf[:-1]) * 24
+        elif tf.endswith('w'):
+            return int(tf[:-1]) * 24 * 7
+        else:
+            return 2.0  # Default fallback
+
+    # Find the longest timeframe and calculate appropriate cutoff
+    max_tf_hours = max([tf_to_hours(tf) for tf in available_timeframes])
+    cutoff_hours = max(max_tf_hours * 1.5, 2.0)  # At least 2 hours, or 1.5x longest timeframe
+    cutoff_time = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=cutoff_hours)
+
 
     with Session(engine) as session:
         for pair in PAIRS:
