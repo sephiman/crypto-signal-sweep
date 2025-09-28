@@ -264,39 +264,33 @@ def format_market_summary_message(summaries: List[PairSummary]) -> str:
     readiness_order = {"READY": 0, "BUILDING": 1, "NO SETUP": 2}
     sorted_summaries = sorted(summaries, key=lambda x: (readiness_order.get(x.signal_readiness, 3), x.pair))
 
-    # Format each pair - all info on one line
+    # Format pairs - one per line
     for summary in sorted_summaries:
-        # Pair header with overall bias
-        bias_emoji = "📈" if "BULLISH" in summary.overall_bias else "📉" if "BEARISH" in summary.overall_bias else "📊"
+        # Remove "/USDT" suffix from pair name
+        pair_name = summary.pair.replace("/USDT", "")
 
-        # Timeframe details
+        # Compact timeframe details with timeframe labels
         tf_details = []
         for tf in sorted(summary.timeframes.keys(), key=lambda x: ['1m', '5m', '15m', '1h', '4h', '1d', '1w'].index(x) if x in ['1m', '5m', '15m', '1h', '4h', '1d', '1w'] else 999):
             if tf in summary.timeframes:
                 tf_data = summary.timeframes[tf]
-                rsi_status = ""
-                if tf_data.rsi <= 30:
-                    rsi_status = "🟢"  # Oversold (potential long)
-                elif tf_data.rsi >= 70:
-                    rsi_status = "🔴"  # Overbought (potential short)
-                else:
-                    rsi_status = "⚪"  # Neutral
+                tf_details.append(f"{tf}: {tf_data.emoji}{tf_data.rsi:.0f}")
 
-                tf_details.append(f"{tf}:{tf_data.emoji}RSI{tf_data.rsi:.0f}{rsi_status}")
-
-        # Signal readiness
+        # Calculate best score for display
         best_score = max([tf_data.score for tf_data in summary.timeframes.values()])
 
-        # All info on one line: Pair | Timeframes | Status
-        lines.append(f"{bias_emoji} *{summary.pair}* | {' '.join(tf_details)} | {summary.readiness_emoji}({best_score})")
+        # Format: PAIR:  timeframe: trend|timeframe: trend  status(score)
+        pair_line = f"{pair_name}:  {' | '.join(tf_details)} {summary.readiness_emoji}({best_score})"
+        lines.append(pair_line)
 
     # Legend
     lines.extend([
         "",  # Empty line before legend
         "*Legend:*",
-        "↗️ Bullish | ↘️ Bearish | ➡️ Ranging | ⚡ Volatile",
-        "🎯 Ready | ⏳ Building | ❌ No Setup",
-        "🟢 Oversold | 🔴 Overbought | ⚪ Neutral"
+        "Format: TF: Trend RSI | TF: Trend RSI  Status(Score)",
+        "Example: 15m: ➡️ 64 = 15min Ranging RSI 64",
+        "Trend: ↗️Bull ↘️Bear ➡️Range ⚡Vol",
+        "Status: 🎯Ready ⏳Building ❌None"
     ])
 
     return "\n".join(lines)
