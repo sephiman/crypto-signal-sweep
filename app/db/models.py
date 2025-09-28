@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
+import uuid
 
 Base = declarative_base()
 
@@ -7,6 +8,7 @@ Base = declarative_base()
 class Signal(Base):
     __tablename__ = 'signals'
     id = Column(Integer, primary_key=True, index=True)
+    signal_uuid = Column(String, unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
     pair = Column(String, nullable=False)
     timeframe = Column(String, nullable=False)
     side = Column(String, nullable=False)

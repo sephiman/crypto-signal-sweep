@@ -10,9 +10,20 @@ TREND_MA_PERIOD = int(os.getenv("TREND_MA_PERIOD", 21))
 REQUIRED_MA_BARS = int(os.getenv("REQUIRED_MA_BARS", 2))
 SEND_UNCONFIRMED = os.getenv("SEND_UNCONFIRMED", "false").lower() == "true"
 DYNAMIC_SCORE_ENABLED = os.getenv("DYNAMIC_SCORE_ENABLED", "true").lower() == "true"
+# global score settings
 MIN_SCORE_DEFAULT = int(os.getenv("MIN_SCORE_DEFAULT", 5))
 MIN_SCORE_TRENDING = int(os.getenv("MIN_SCORE_TRENDING", 5))
 MIN_SCORE_RANGING = int(os.getenv("MIN_SCORE_RANGING", 4))
+
+# Timeframe-specific minimum score requirements
+TIMEFRAME_MIN_SCORES = {
+    "1m": 3,
+    "5m": 4,
+    "15m": 5,
+    "1h": 6,
+    "4h": 7,
+    "1d": 7,
+}
 MIN_ATR_RATIO = float(os.getenv("MIN_ATR_RATIO", 0.005))
 
 ADX_PERIOD = int(os.getenv("ADX_PERIOD", 14))
@@ -71,8 +82,38 @@ ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.2))
 ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 2.4))
 
 # Volume confirmation
-VOLUME_CONFIRMATION_ENABLED = os.getenv("VOLUME_CONFIRMATION_ENABLED", "false").lower() == "true"
+VOLUME_CONFIRMATION_ENABLED = os.getenv("VOLUME_CONFIRMATION_ENABLED", "true").lower() == "true"
 MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "0.8"))
+
+# Timeframe-specific cooldown periods (in minutes)
+TIMEFRAME_COOLDOWNS = {
+    "1m": 5,     # 5 minutes cooldown for 1m timeframe
+    "5m": 15,    # 15 minutes cooldown for 5m timeframe
+    "15m": 30,   # 30 minutes cooldown for 15m timeframe
+    "1h": 120,   # 2 hours cooldown for 1h timeframe
+    "4h": 480,   # 8 hours cooldown for 4h timeframe
+    "1d": 1440,  # 24 hours cooldown for 1d timeframe
+}
+
+# Timeframe-specific volume ratios
+TIMEFRAME_VOLUME_RATIOS = {
+    "1m": 0.5,   # Lower volume threshold for 1m (more noise)
+    "5m": 0.6,   # Slightly higher for 5m
+    "15m": 0.8,  # Standard volume for 15m
+    "1h": 1.0,   # Higher volume requirement for 1h
+    "4h": 1.2,   # Even higher for 4h
+    "1d": 1.5,   # Highest volume requirement for daily
+}
+
+# Timeframe-specific ADX thresholds for trend detection
+TIMEFRAME_ADX_THRESHOLDS = {
+    "1m": 35,    # Higher threshold for 1m (more noise, need stronger trends)
+    "5m": 32,    # Slightly lower for 5m
+    "15m": 28,   # Standard threshold for 15m (current default)
+    "1h": 25,    # Lower for 1h (trends develop more clearly)
+    "4h": 22,    # Even lower for 4h (strong trends easier to detect)
+    "1d": 20,    # Lowest for daily (clear trend signals)
+}
 
 # Time-based filtering
 TIME_FILTER_ENABLED = os.getenv("TIME_FILTER_ENABLED", "true").lower() == "true"
@@ -95,3 +136,20 @@ HIGHER_TF_MAP = {
     "4h":  "1d",
     "1d":  "1w"
 }
+
+# Helper functions for timeframe-specific configurations
+def get_min_score_for_timeframe(timeframe: str) -> int:
+    """Get minimum score requirement for specific timeframe."""
+    return TIMEFRAME_MIN_SCORES.get(timeframe, MIN_SCORE_DEFAULT)
+
+def get_cooldown_for_timeframe(timeframe: str) -> int:
+    """Get cooldown period in minutes for specific timeframe."""
+    return TIMEFRAME_COOLDOWNS.get(timeframe, tf_to_minutes(timeframe) * 4 + 1)
+
+def get_volume_ratio_for_timeframe(timeframe: str) -> float:
+    """Get volume ratio requirement for specific timeframe."""
+    return TIMEFRAME_VOLUME_RATIOS.get(timeframe, MIN_VOLUME_RATIO)
+
+def get_adx_threshold_for_timeframe(timeframe: str) -> int:
+    """Get ADX threshold for trend detection for specific timeframe."""
+    return TIMEFRAME_ADX_THRESHOLDS.get(timeframe, ADX_THRESHOLD)

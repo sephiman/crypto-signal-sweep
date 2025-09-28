@@ -48,7 +48,7 @@ def save_signal(signal: Dict):
             s = Signal(**cleaned)
             session.add(s)
             session.commit()
-            logger.info(f"Saved signal: {s.id} | {s.pair} {s.timeframe} {s.side}")
+            logger.info(f"Saved signal: {s.id} | {s.signal_uuid} | {s.pair} {s.timeframe} {s.side}")
     except SQLAlchemyError as e:
         logger.error(f"DB error saving signal: {e}")
 
@@ -95,6 +95,7 @@ def _check_breakeven_hit(signal, high, low):
 def _create_update_record(signal, current_price, hit_type, now, action):
     """Create an update record for signal status changes."""
     return {
+        "signal_uuid": signal.signal_uuid,
         "pair": signal.pair,
         "timeframe": signal.timeframe,
         "side": signal.side,

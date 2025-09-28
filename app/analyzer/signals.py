@@ -1,5 +1,6 @@
 import datetime
 import logging
+import uuid
 
 import ccxt
 import pandas as pd
@@ -14,11 +15,13 @@ from app.config import (
     MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF,
     EMA_FAST, EMA_SLOW,
     ATR_PERIOD, ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER,
-    SEND_UNCONFIRMED, ADX_PERIOD, ADX_THRESHOLD, RSI_MOMENTUM, ADX_RSI_MODE, MACD_MIN_DIFF_ENABLED,
-    EMA_MIN_DIFF_ENABLED, DYNAMIC_SCORE_ENABLED, MIN_SCORE_RANGING, MIN_SCORE_DEFAULT, MIN_ATR_RATIO,
-    MIN_SCORE_TRENDING, TIME_FILTER_ENABLED, TIME_FILTER_TIMEZONE, AVOID_HOURS_START, AVOID_HOURS_END, MIN_VOLUME_RATIO,
+    SEND_UNCONFIRMED, ADX_PERIOD, RSI_MOMENTUM, ADX_RSI_MODE, MACD_MIN_DIFF_ENABLED,
+    EMA_MIN_DIFF_ENABLED, DYNAMIC_SCORE_ENABLED, MIN_SCORE_RANGING, MIN_ATR_RATIO,
+    MIN_SCORE_TRENDING, TIME_FILTER_ENABLED, TIME_FILTER_TIMEZONE, AVOID_HOURS_START, AVOID_HOURS_END,
     VOLUME_CONFIRMATION_ENABLED, RSI_TRENDING_MODE, RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
-    RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT, STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_OVERSOLD, STOCH_OVERBOUGHT, STOCH_ENABLED
+    RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT, STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_OVERSOLD, STOCH_OVERBOUGHT,
+    STOCH_ENABLED,
+    get_min_score_for_timeframe, get_volume_ratio_for_timeframe, get_adx_threshold_for_timeframe
 )
 
 logger = logging.getLogger(__name__)
@@ -95,10 +98,10 @@ def analyze_market(pairs, timeframe):
             conditions = _calculate_market_conditions(data, indicators, timeframe, pair)
 
             # Scoring system
-            long_score, short_score, min_score = _calculate_scores(indicators, conditions)
+            long_score, short_score, min_score = _calculate_scores(indicators, conditions, timeframe)
 
             # Determine signal side and status
-            side, status, result = _determine_signal_side(long_score, short_score, min_score, conditions, indicators)
+            side, status, result = _determine_signal_side(long_score, short_score, min_score, conditions, indicators, timeframe)
 
             # Log analysis and save to database
             _log_and_save_analysis(pair, timeframe, price, status, result, long_score, short_score,
@@ -142,15 +145,6 @@ def _fetch_ohlcv_df(pairs, timeframe):
     return result
 
 
-def _dynamic_min_score(adx_value: float) -> int:
-    """
-    Decide the min score depending on the ADX value.
-    If DYNAMIC_SCORE_ENABLED is enabled and the market is not in a strong trend, it allows lower score
-    """
-    if DYNAMIC_SCORE_ENABLED:
-        return MIN_SCORE_RANGING if adx_value < ADX_THRESHOLD else MIN_SCORE_DEFAULT
-    return MIN_SCORE_DEFAULT
-
 
 def _is_valid_trading_time():
     """Check if current time is within valid trading hours (configured timezone)"""
@@ -172,7 +166,25 @@ def _is_valid_trading_time():
         return not (AVOID_HOURS_START <= current_hour < AVOID_HOURS_END)
 
 
-def _check_volume_confirmation(data):
+def _get_dynamic_min_score_for_timeframe(timeframe, is_trending):
+    """
+    Get minimum score based on timeframe and market regime (trending vs ranging).
+    Uses timeframe-specific base scores but applies dynamic adjustment for ranging markets.
+    """
+    base_score = get_min_score_for_timeframe(timeframe)
+
+    if DYNAMIC_SCORE_ENABLED:
+        if is_trending:
+            # In trending markets, use the timeframe base score or trending minimum
+            return max(base_score, MIN_SCORE_TRENDING)
+        else:
+            # In ranging markets, allow lower scores (more permissive)
+            return min(base_score, MIN_SCORE_RANGING)
+
+    return base_score
+
+
+def _check_volume_confirmation(data, timeframe):
     """Check if current volume is above average"""
     if len(data) < 20:
         return True  # Not enough data, allow signal
@@ -184,7 +196,8 @@ def _check_volume_confirmation(data):
         return True
 
     volume_ratio = current_volume / avg_volume
-    return volume_ratio >= (MIN_VOLUME_RATIO - 0.01)
+    required_ratio = get_volume_ratio_for_timeframe(timeframe)
+    return volume_ratio >= (required_ratio - 0.01)
 
 
 def _get_volume_ratio(data):
@@ -227,14 +240,6 @@ def _get_htf_confirmation(pair, higher_tf):
         return True, True  # Default to allowing signals if HTF fails
 
 
-def _dynamic_min_score_trending(is_trending):
-    """Dynamic scoring with stricter requirements"""
-    if DYNAMIC_SCORE_ENABLED:
-        if is_trending:
-            return MIN_SCORE_TRENDING
-        else:
-            return MIN_SCORE_RANGING
-    return MIN_SCORE_DEFAULT
 
 
 def _calculate_sl_tp(price, atr, side, pair):
@@ -306,7 +311,7 @@ def _calculate_technical_indicators(data, price):
 
 def _calculate_market_conditions(data, indicators, timeframe, pair):
     """Calculate all market conditions and filters"""
-    volume_pass = not VOLUME_CONFIRMATION_ENABLED or _check_volume_confirmation(data)
+    volume_pass = not VOLUME_CONFIRMATION_ENABLED or _check_volume_confirmation(data, timeframe)
     atr_pass = indicators.atr_pct >= MIN_ATR_RATIO
 
     min_ema_separation = indicators.atr * 0.5
@@ -329,7 +334,8 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
         ema_ok_short = indicators.ema_fast < indicators.ema_slow
 
     # RSI regime logic
-    is_trending = indicators.adx >= ADX_THRESHOLD
+    adx_threshold = get_adx_threshold_for_timeframe(timeframe)
+    is_trending = indicators.adx >= adx_threshold
     if ADX_RSI_MODE == "rsi":
         # Simple mode: always use standard oversold/overbought levels
         rsi_ok_long = indicators.rsi < RSI_OVERSOLD
@@ -384,7 +390,7 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
                           volume_pass, atr_pass, is_trending)
 
 
-def _calculate_scores(indicators, conditions):
+def _calculate_scores(indicators, conditions, timeframe):
     """Calculate scoring system for long and short signals"""
     long_gates = [
         conditions.rsi_ok_long,
@@ -408,12 +414,12 @@ def _calculate_scores(indicators, conditions):
 
     long_score = sum(long_gates)
     short_score = sum(short_gates)
-    min_score = _dynamic_min_score_trending(conditions.is_trending)
+    min_score = _get_dynamic_min_score_for_timeframe(timeframe, conditions.is_trending)
 
     return long_score, short_score, min_score
 
 
-def _determine_signal_side(long_score, short_score, min_score, conditions, indicators):
+def _determine_signal_side(long_score, short_score, min_score, conditions, indicators, timeframe):
     """Determine signal side and status based on scores and conditions"""
     # Determine signal side based on scoring system only
     if long_score >= min_score and long_score >= short_score:
@@ -450,7 +456,8 @@ def _determine_signal_side(long_score, short_score, min_score, conditions, indic
     # Determine final status and reason
     if not conditions.volume_pass:
         status = "⏭️ SKIP"
-        result = f"LOW_VOL({indicators.volume_ratio:.1f}x<{MIN_VOLUME_RATIO}x)"
+        required_vol = get_volume_ratio_for_timeframe(timeframe)
+        result = f"LOW_VOL({indicators.volume_ratio:.1f}x<{required_vol}x)"
     elif not conditions.atr_pass:
         status = "⏭️ SKIP"
         result = f"LOW_ATR({indicators.atr_pct:.3%}<{MIN_ATR_RATIO:.3%})"
@@ -470,12 +477,13 @@ def _log_and_save_analysis(pair, timeframe, price, status, result, long_score, s
     # All metrics
     stoch_info = f"STOCH:{indicators.stoch_k:.1f}/{indicators.stoch_d:.1f} " if STOCH_ENABLED else ""
     stoch_gates = f"Stoch:{int(conditions.stoch_ok_long)}/{int(conditions.stoch_ok_short)} " if STOCH_ENABLED else ""
+    adx_threshold = get_adx_threshold_for_timeframe(timeframe)
 
     logger.info(
         f"{status} | {timeframe} | {pair} | "
         f"Price:{price:.2f} RSI:{indicators.rsi:.1f} ADX:{indicators.adx:.1f} MACD:{indicators.diff:.4f} "
         f"EMA:{indicators.ema_fast:.2f}/{indicators.ema_slow:.2f} {stoch_info}ATR:{indicators.atr_pct:.3%} VOL:{indicators.volume_ratio:.1f}x | "
-        f"Regime:{'TREND' if indicators.adx >= ADX_THRESHOLD else 'RANGE'} "
+        f"Regime:{'TREND' if indicators.adx >= adx_threshold else 'RANGE'} "
         f"Score:L{long_score}/S{short_score}(min:{min_score}) | "
         f"Gates[L/S]: RSI:{int(conditions.rsi_ok_long)}/{int(conditions.rsi_ok_short)} "
         f"MACD:{int(conditions.momentum_ok_long)}/{int(conditions.momentum_ok_short)} "
@@ -525,8 +533,8 @@ def _log_and_save_analysis(pair, timeframe, price, status, result, long_score, s
         "long_score": long_score,
         "short_score": short_score,
         "min_score_required": min_score,
-        "regime": "TREND" if indicators.adx >= ADX_THRESHOLD else "RANGE",
-        "is_trending": indicators.adx >= ADX_THRESHOLD,
+        "regime": "TREND" if indicators.adx >= adx_threshold else "RANGE",
+        "is_trending": indicators.adx >= adx_threshold,
         "signal_generated": side != "NONE" and conditions.volume_pass and conditions.atr_pass,
         "signal_side": side if side != "NONE" and conditions.volume_pass and conditions.atr_pass else None,
         "skip_reason": result if not (side != "NONE" and conditions.volume_pass and conditions.atr_pass) else None
@@ -556,6 +564,7 @@ def _generate_signal_details(pair, timeframe, side, price, indicators, condition
             tp1 = price - (tp_distance * 0.5)
 
     return {
+        "signal_uuid": str(uuid.uuid4()),
         "pair": pair,
         "timeframe": timeframe,
         "side": side,
@@ -588,7 +597,7 @@ def _generate_signal_details(pair, timeframe, side, price, indicators, condition
         "stoch_d": indicators.stoch_d,
         "atr": indicators.atr,
         "atr_pct": indicators.atr_pct,
-        "regime": "momentum" if indicators.adx >= ADX_THRESHOLD else "mean-reversion",
+        "regime": "momentum" if indicators.adx >= get_adx_threshold_for_timeframe(timeframe) else "mean-reversion",
         "htf_used": USE_HIGHER_TF_CONFIRM,
         "volume_ratio": indicators.volume_ratio,
         "confidence": "HIGH" if long_score >= min_score + 1 or short_score >= min_score + 1 else "MEDIUM"

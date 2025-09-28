@@ -21,6 +21,7 @@ A sophisticated algorithmic trading signal generator that scans multiple cryptoc
 - 📊 **Dynamic Risk-Reward**: Automatic 2:1+ RR ratios with ATR-based optimization
 - 🎯 **Confidence Scoring**: HIGH/MEDIUM confidence levels for signal prioritization
 - 📈 **Stricter RSI**: Extreme oversold/overbought levels (25/75) for higher probability
+- ⚡ **Timeframe Intelligence**: Adaptive scoring, cooldowns, volume, and ADX thresholds per timeframe
 
 ---
 
@@ -136,6 +137,69 @@ PAIRS=BTC/USDT,ETH/USDT,SOL/USDT,ADA/USDT,DOT/USDT
 TIMEFRAMES=15m,1h              # Recommended: 15m for quick signals, 1h for swing trades
 ```
 
+### **🧠 Timeframe Intelligence** *(New in v2.0)*
+
+The system now automatically adapts to each timeframe's unique characteristics with optimized settings:
+
+#### **Adaptive Minimum Scores**
+Different timeframes require different signal quality standards:
+```bash
+# Timeframe-specific minimum score requirements (auto-configured)
+# 1m:  3 points (more permissive for fast timeframes)
+# 5m:  4 points
+# 15m: 5 points (standard/balanced)
+# 1h:  6 points (higher threshold for swing trades)
+# 4h:  7 points (most selective for position trades)
+# 1d:  7 points (maximum selectivity)
+```
+
+#### **Smart Cooldown Periods**
+Prevents over-trading with timeframe-appropriate cooldowns:
+```bash
+# Timeframe-specific cooldown periods (auto-configured)
+# 1m:  5 minutes   (quick re-entry for scalping)
+# 5m:  15 minutes  (balanced for short-term)
+# 15m: 30 minutes  (standard timeframe)
+# 1h:  120 minutes (2 hours for swing setups)
+# 4h:  480 minutes (8 hours for position trades)
+# 1d:  1440 minutes (24 hours for long-term signals)
+```
+
+#### **Volume Requirements by Timeframe**
+Volume thresholds adapted to timeframe noise characteristics:
+```bash
+# Timeframe-specific volume ratios (auto-configured)
+# 1m:  0.5x (lower threshold due to noise)
+# 5m:  0.6x (slightly higher)
+# 15m: 0.8x (standard baseline)
+# 1h:  1.0x (higher requirement)
+# 4h:  1.2x (even stricter)
+# 1d:  1.5x (highest volume requirement)
+```
+
+#### **ADX Thresholds for Trend Detection**
+Trend detection sensitivity optimized per timeframe:
+```bash
+# Timeframe-specific ADX thresholds (auto-configured)
+# 1m:  35 (higher threshold - filter noise)
+# 5m:  32 (slightly lower)
+# 15m: 28 (standard threshold)
+# 1h:  25 (lower - trends clearer)
+# 4h:  22 (even lower)
+# 1d:  20 (lowest - clear trend signals)
+```
+
+#### **Dynamic Scoring Logic**
+The system combines timeframe intelligence with market regime awareness:
+- **Trending Markets**: Uses `max(timeframe_score, 5)` for quality
+- **Ranging Markets**: Uses `min(timeframe_score, 4)` for opportunity
+- **Fallback**: Uses timeframe-specific base score if dynamic scoring disabled
+
+**Example**: 1h timeframe in ranging market:
+- Base requirement: 6 points
+- Dynamic adjustment: `min(6, 4) = 4 points` (more permissive in ranges)
+- Result: Allows more signals during sideways markets on higher timeframes
+
 ---
 
 ## 📊 **Performance Analytics**
@@ -181,6 +245,19 @@ SELECT
 FROM signals
 WHERE hit IN ('SUCCESS', 'FAILURE')
 GROUP BY regime;
+
+-- Performance by Timeframe (NEW)
+SELECT
+  timeframe,
+  COUNT(*) as total_signals,
+  COUNT(*) FILTER (WHERE hit = 'SUCCESS') as wins,
+  COUNT(*) FILTER (WHERE hit = 'FAILURE') as losses,
+  ROUND(AVG(CASE WHEN hit = 'SUCCESS' THEN 1.0 ELSE 0.0 END) * 100, 2) as win_rate,
+  ROUND(AVG((take_profit_2 - price) / ABS(stop_loss - price)), 2) as avg_rr_ratio
+FROM signals
+WHERE hit IN ('SUCCESS', 'FAILURE')
+GROUP BY timeframe
+ORDER BY timeframe;
 ```
 
 ---
@@ -393,9 +470,14 @@ REQUIRED_MA_BARS=2
    - Verify network connectivity between containers
 
 ### **Optimization Tips**
-- **For More Signals**: Lower volume ratio, reduce minimum scores
+- **For More Signals**: Lower volume ratio, reduce minimum scores, or modify timeframe-specific thresholds
 - **For Higher Quality**: Increase ADX threshold, require HTF confirmation
 - **For Different Markets**: Adjust RSI thresholds based on volatility
+- **Timeframe Tuning**: All timeframe-specific settings are automatically configured but can be customized in `config.py`:
+  - `TIMEFRAME_MIN_SCORES`: Adjust minimum score requirements per timeframe
+  - `TIMEFRAME_COOLDOWNS`: Modify cooldown periods per timeframe
+  - `TIMEFRAME_VOLUME_RATIOS`: Change volume requirements per timeframe
+  - `TIMEFRAME_ADX_THRESHOLDS`: Customize trend detection sensitivity per timeframe
 
 ---
 

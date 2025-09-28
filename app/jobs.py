@@ -3,12 +3,12 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.analyzer.signals import analyze_market
-from app.config import PAIRS, tf_to_minutes
+from app.config import PAIRS, get_cooldown_for_timeframe
 from app.db.init_db import engine
 from app.db.tracker import check_hit_signals, summarize_and_notify
 from app.db.tracker import has_recent_pending, save_signal
-from app.telegram_bot import send_alerts, send_tp1_alerts, send_signal_outcome_alerts
 from app.exception_notifier import send_exception_notification
+from app.telegram_bot import send_alerts, send_tp1_alerts, send_signal_outcome_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ def run_analysis_job(timeframe):
     try:
         signals = analyze_market(PAIRS, timeframe)
 
-        cooldown_mins = tf_to_minutes(timeframe) * 4 + 1
+        cooldown_mins = get_cooldown_for_timeframe(timeframe)
 
         with Session(engine) as session:
             to_alert = []

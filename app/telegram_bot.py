@@ -40,7 +40,8 @@ def send_alerts(signals):
                 f"\n{rr_text} | *Score:* {s.get('score', '?')}/{s.get('required_score', '?')}"
                 f"\n📈 *RSI:* {s.get('rsi', 0):.1f} | *ADX:* {s.get('adx', 0):.1f}"
                 f"\n🔄 *Volume:* {s.get('volume_ratio', 1.0):.1f}x | *Confidence:* {s.get('confidence', 'MEDIUM')}{strategy_note}"
-                f"\n⏰ {s['timestamp']:%H:%M UTC}\n"
+                f"\n⏰ {s['timestamp']:%H:%M UTC}"
+                f"\n🆔 `{s.get('signal_uuid', 'N/A')}`\n"
             )
         text = "\n".join(lines)
 
@@ -76,7 +77,8 @@ def send_tp1_alerts(hit_updates):
             f"\n⚡ *{update['pair']}* | {update['timeframe']} | *{update['side']}*"
             f"\n💰 *Current Price:* {update['price']:.6f}"
             f"\n{update['action']}"
-            f"\n⏰ {update['hit_timestamp']:%H:%M UTC}\n"
+            f"\n⏰ {update['hit_timestamp']:%H:%M UTC}"
+            f"\n🆔 `{update.get('signal_uuid', 'N/A')}`\n"
         )
     
     text = "\n".join(lines)
@@ -120,7 +122,8 @@ def send_signal_outcome_alerts(hit_updates):
             f"\n💰 *Final Price:* {update['price']:.6f}"
             f"\n📝 *Outcome:* {update['hit']}"
             f"\n{update['action']}"
-            f"\n⏰ {update['hit_timestamp']:%H:%M UTC}\n"
+            f"\n⏰ {update['hit_timestamp']:%H:%M UTC}"
+            f"\n🆔 `{update.get('signal_uuid', 'N/A')}`\n"
         )
     
     text = "\n".join(lines)
