@@ -53,6 +53,7 @@ A sophisticated algorithmic trading signal generator that scans multiple cryptoc
 
 ### **Monitoring & Analytics**
 - 📱 **Enhanced Telegram Alerts**: Real-time notifications with RR ratios and confidence levels
+- 📊 **Automated Market Summary**: Hourly market overview with trend analysis and RSI levels across all pairs/timeframes
 - 🗄️ **PostgreSQL Tracking**: Complete signal history with outcomes and performance metrics
 - 📊 **Backtesting Ready**: Full data retention for strategy optimization
 - 📈 **Performance Dashboard**: pgAdmin integration for advanced analytics
@@ -129,6 +130,9 @@ TIME_FILTER_ENABLED=true
 TIME_FILTER_TIMEZONE=Europe/Paris     # Configure timezone (CEST)
 AVOID_HOURS_START=0            # Skip 00:00-07:00 in configured timezone
 AVOID_HOURS_END=7
+
+# Market Summary
+MARKET_SUMMARY_ENABLED=true    # Enable hourly market summary (runs at minute 4 of each hour)
 ```
 
 ### **Trading Pairs & Timeframes**
@@ -361,6 +365,21 @@ All signals include two take profit levels:
 📈 RSI: 23.5 | ADX: 31.2
 🔄 Volume: 1.8x | Confidence: HIGH
 ⏰ 14:30 UTC
+```
+
+### **Market Summary** *(New in v2.0)*
+Automated hourly market overview showing trend direction and signal readiness:
+```
+📊 MARKET SUMMARY - 16:04 UTC
+
+📈 BTC/USDT | 15m:↗️RSI65⚪ 1h:↗️RSI58⚪ | 🎯(6)
+📉 ETH/USDT | 15m:↘️RSI35⚪ 1h:↘️RSI42⚪ | ⏳(5)
+📊 XRP/USDT | 15m:➡️RSI48⚪ 1h:⚡RSI52⚪ | ❌(3)
+
+*Legend:*
+↗️ Bullish | ↘️ Bearish | ➡️ Ranging | ⚡ Volatile
+🎯 Ready | ⏳ Building | ❌ No Setup
+🟢 Oversold | 🔴 Overbought | ⚪ Neutral
 ```
 
 ### **Daily Summary**

@@ -13,7 +13,11 @@ def send_alerts(signals):
         return
 
     if len(signals) == 1 and "summary" in signals[0]:
-        text = f"📊 *Daily Summary*\n{signals[0]['summary']}"
+        summary_text = signals[0]['summary']
+        if "MARKET SUMMARY" in summary_text:
+            text = summary_text
+        else:
+            text = f"📊 *Daily Summary*\n{summary_text}"
     else:
         lines = ["🚨 *Signal Alert*"]
         for s in signals:

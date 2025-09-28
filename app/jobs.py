@@ -9,6 +9,7 @@ from app.db.tracker import check_hit_signals, summarize_and_notify
 from app.db.tracker import has_recent_pending, save_signal
 from app.exception_notifier import send_exception_notification
 from app.telegram_bot import send_alerts, send_tp1_alerts, send_signal_outcome_alerts
+from app.market_summary import generate_and_send_market_summary
 
 logger = logging.getLogger(__name__)
 
@@ -57,3 +58,15 @@ def run_hit_polling_job():
     except Exception as e:
         logger.error("Error in hit polling job", exc_info=True)
         send_exception_notification(e, "run_hit_polling_job", "Failed to check signal hits")
+
+
+def run_market_summary_job():
+    """
+    Generate and send hourly market summary with trend analysis and RSI levels.
+    """
+    try:
+        logger.info("Starting hourly market summary job")
+        generate_and_send_market_summary()
+    except Exception as e:
+        logger.error("Error in market summary job", exc_info=True)
+        send_exception_notification(e, "run_market_summary_job", "Failed to generate hourly market summary")

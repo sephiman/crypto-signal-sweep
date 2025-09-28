@@ -121,6 +121,9 @@ TIME_FILTER_TIMEZONE = os.getenv("TIME_FILTER_TIMEZONE", "Europe/Paris")  # CEST
 AVOID_HOURS_START = int(os.getenv("AVOID_HOURS_START", "0"))
 AVOID_HOURS_END = int(os.getenv("AVOID_HOURS_END", "7"))
 
+# Market summary configuration
+MARKET_SUMMARY_ENABLED = os.getenv("MARKET_SUMMARY_ENABLED", "true").lower() == "true"
+
 def tf_to_minutes(tf: str) -> int:
     m = re.match(r"(\d+)([mh])", tf)
     if not m:

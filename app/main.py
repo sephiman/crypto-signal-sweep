@@ -3,9 +3,9 @@ import logging
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.config import TIMEFRAMES, RUN_AT_START
+from app.config import TIMEFRAMES, RUN_AT_START, MARKET_SUMMARY_ENABLED
 from app.config import tf_to_minutes
-from app.jobs import run_analysis_job, run_midnight_summary_job, run_hit_polling_job
+from app.jobs import run_analysis_job, run_midnight_summary_job, run_hit_polling_job, run_market_summary_job
 from app.exception_notifier import setup_exception_notification
 
 logging.basicConfig(
@@ -38,6 +38,7 @@ for tf in TIMEFRAMES:
 
 if RUN_AT_START:
     run_midnight_summary_job()
+    run_market_summary_job()
 
 # Poll for SL/TP hits once per minute (no need to align to candles)
 scheduler.add_job(
@@ -53,6 +54,14 @@ scheduler.add_job(
     trigger=CronTrigger(hour=0, minute=0, second="10"),
     id="run_midnight_summary"
 )
+
+# Hourly market summary at 4 minutes past the hour (X:04)
+if MARKET_SUMMARY_ENABLED:
+    scheduler.add_job(
+        run_market_summary_job,
+        trigger=CronTrigger(minute=4, second="0"),
+        id="run_market_summary"
+    )
 
 if __name__ == "__main__":
     scheduler.start()
