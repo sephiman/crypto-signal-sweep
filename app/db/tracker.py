@@ -396,7 +396,7 @@ def summarize_and_notify() -> Optional[str]:
             lines.append(
                 f"{label}: {full_success}W/{partial_success}BE/{failures}L "
                 f"({win_rate:.1f}%) | "
-                f"P&L: {total_pnl:+.1f}% ({avg_pnl_per_trade:+.1f}%/trade)"
+                f"P&L: {total_pnl:+.1f}% ({avg_pnl_per_trade:+.1f}% per trade)"
             )
 
     # Add legend at the end
