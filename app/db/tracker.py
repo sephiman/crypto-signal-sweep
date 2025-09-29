@@ -332,7 +332,7 @@ def summarize_and_notify() -> Optional[str]:
         ("7d", datetime.timedelta(days=7)),
         ("30d", datetime.timedelta(days=30)),
     ]
-    lines = ["📊 *Trading Performance Summary*"]
+    lines = ["📊 Daily Trading Performance Summary", ""]
 
     with Session(engine) as session:
         for label, delta in periods:
@@ -346,7 +346,7 @@ def summarize_and_notify() -> Optional[str]:
                 .all()
 
             if not completed_signals:
-                lines.append(f"{label}: No completed trades")
+                lines.append(f"{label}: 0W/0BE/0L (0.0%) | P&L: +0.0% (+0.0% per trade)")
                 continue
 
             total = len(completed_signals)
@@ -392,15 +392,15 @@ def summarize_and_notify() -> Optional[str]:
             win_rate = ((full_success + partial_success) / total * 100) if total else 0.0
             avg_pnl_per_trade = total_pnl / total if total else 0.0
 
-            # Format the summary line
-            pnl_color = "🟢" if total_pnl > 0 else "🔴" if total_pnl < 0 else "⚪"
-
+            # Format the summary line in the new compact format
             lines.append(
-                f"{label}: {full_success}🎯/{partial_success}⚖️/{failures}❌ "
-                f"({win_rate:.1f}% wins)"
-                f"\n  {pnl_color} P&L: {total_pnl:+.1f}% | "
-                f"Avg: {avg_pnl_per_trade:+.1f}%/trade"
+                f"{label}: {full_success}W/{partial_success}BE/{failures}L "
+                f"({win_rate:.1f}%) | "
+                f"P&L: {total_pnl:+.1f}% ({avg_pnl_per_trade:+.1f}%/trade)"
             )
+
+    # Add legend at the end
+    lines.extend(["", "Legend: W=Win(TP2) BE=Breakeven(TP1) L=Loss"])
 
     summary = "\n".join(lines)
     logger.info(f"Trading performance summary:\n{summary}")
