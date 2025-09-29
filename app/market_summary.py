@@ -44,15 +44,15 @@ def get_trend_direction(ema_fast: float, ema_slow: float, adx: float, timeframe:
     if adx >= adx_threshold:
         # Trending market
         if ema_fast > ema_slow:
-            return "bullish", "↗️"
+            return "bullish", "🟢"
         else:
-            return "bearish", "↘️"
+            return "bearish", "🔴"
     else:
         # Non-trending market - check for volatility
         if adx >= (adx_threshold * 0.7):  # Moderate ADX with conflicting signals
-            return "volatile", "⚡"
+            return "volatile", "🟡"
         else:
-            return "ranging", "➡️"
+            return "ranging", "⚪"
 
 
 def get_signal_readiness(score: int, required_score: int) -> Tuple[str, str]:
@@ -280,7 +280,7 @@ def format_market_summary_message(summaries: List[PairSummary]) -> str:
         best_score = max([tf_data.score for tf_data in summary.timeframes.values()])
 
         # Format: PAIR:  timeframe: trend|timeframe: trend  status(score)
-        pair_line = f"{pair_name}:  {' | '.join(tf_details)} {summary.readiness_emoji}({best_score})"
+        pair_line = f"*{pair_name}*:  {' | '.join(tf_details)} {summary.readiness_emoji}({best_score})"
         lines.append(pair_line)
 
     # Legend
@@ -288,8 +288,8 @@ def format_market_summary_message(summaries: List[PairSummary]) -> str:
         "",  # Empty line before legend
         "*Legend:*",
         "Format: TF: Trend RSI | TF: Trend RSI  Status(Score)",
-        "Example: 15m: ➡️ 64 = 15min Ranging RSI 64",
-        "Trend: ↗️Bull ↘️Bear ➡️Range ⚡Vol",
+        "Example: 15m: ⚪ 64 = 15min Ranging RSI 64",
+        "Trend: 🟢Bull 🔴Bear ⚪Range 🟡Vol",
         "Status: 🎯Ready ⏳Building ❌None"
     ])
 
