@@ -85,6 +85,7 @@ A sophisticated algorithmic trading signal generator that scans multiple cryptoc
    environment:
      - TELEGRAM_TOKEN=your_bot_token
      - TELEGRAM_CHAT_ID=your_chat_id
+     - TELEGRAM_MARKET_CHAT_ID=your_market_chat_id
      - PAIRS=BTC/USDT,ETH/USDT,SOL/USDT  # Add your preferred pairs
    ```
 

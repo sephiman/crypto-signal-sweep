@@ -3,14 +3,21 @@ import logging
 
 import requests
 
-from app.config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+from app.config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_MARKET_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
 
-def send_alerts(signals):
+def send_alerts(signals, chat_id=None):
     if not signals:
         return
+
+    # Use market chat ID for summary messages, default chat ID otherwise
+    if chat_id is None:
+        if len(signals) == 1 and "summary" in signals[0]:
+            chat_id = TELEGRAM_MARKET_CHAT_ID
+        else:
+            chat_id = TELEGRAM_CHAT_ID
 
     if len(signals) == 1 and "summary" in signals[0]:
         text = signals[0]['summary']
@@ -46,7 +53,7 @@ def send_alerts(signals):
         text = "\n".join(lines)
 
     payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": chat_id,
         "text": text,
         "parse_mode": "Markdown"
     }

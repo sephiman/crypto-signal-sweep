@@ -34,6 +34,7 @@ services:
     environment:
       - TELEGRAM_TOKEN=
       - TELEGRAM_CHAT_ID=
+      - TELEGRAM_MARKET_CHAT_ID=
       - DB_ENABLED=true
       - DB_USER=root
       - DB_PASSWORD=

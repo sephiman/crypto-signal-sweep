@@ -73,6 +73,7 @@ DB_URL = (
 )
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_MARKET_CHAT_ID = os.getenv("TELEGRAM_MARKET_CHAT_ID", TELEGRAM_CHAT_ID)
 
 # how many candles to use when computing ATR
 ATR_PERIOD = int(os.getenv("ATR_PERIOD", 14))
