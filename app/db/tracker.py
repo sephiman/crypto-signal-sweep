@@ -332,9 +332,15 @@ def summarize_and_notify() -> Optional[str]:
         ("7d", datetime.timedelta(days=7)),
         ("30d", datetime.timedelta(days=30)),
     ]
-    lines = ["📊 Daily Trading Performance Summary", ""]
+    lines = ["📊 *Daily Trading Performance Summary*", ""]
 
     with Session(engine) as session:
+        # Get all unique timeframes from database
+        timeframes_query = session.query(Signal.timeframe).distinct().all()
+        timeframes = sorted([tf[0] for tf in timeframes_query], key=lambda x: ['1m', '5m', '15m', '1h', '4h', '1d', '1w'].index(x) if x in ['1m', '5m', '15m', '1h', '4h', '1d', '1w'] else 999)
+
+        # Global stats
+        lines.append("*GLOBAL*")
         for label, delta in periods:
             cutoff = now - delta
 
@@ -346,7 +352,7 @@ def summarize_and_notify() -> Optional[str]:
                 .all()
 
             if not completed_signals:
-                lines.append(f"{label}: 0W/0BE/0L (0.0%) | P&L: +0.0% (+0.0% per trade)")
+                lines.append(f"{label}: 0W/0BE/0L   (0.0%)  | P&L: +0.0%")
                 continue
 
             total = len(completed_signals)
@@ -390,17 +396,80 @@ def summarize_and_notify() -> Optional[str]:
 
             # Calculate metrics
             win_rate = ((full_success + partial_success) / total * 100) if total else 0.0
-            avg_pnl_per_trade = total_pnl / total if total else 0.0
 
-            # Format the summary line in the new compact format
+            # Format the summary line with proper spacing
             lines.append(
-                f"{label}: {full_success}W/{partial_success}BE/{failures}L "
-                f"({win_rate:.1f}%) | "
-                f"P&L: {total_pnl:+.1f}% ({avg_pnl_per_trade:+.1f}% per trade)"
+                f"{label}: {full_success}W/{partial_success}BE/{failures}L  "
+                f"({win_rate:.1f}%)  | "
+                f"P&L: {total_pnl:+.1f}%"
             )
 
+        # Timeframe breakdown
+        if timeframes:
+            lines.append("")
+            lines.append("*BY TIMEFRAME*")
+
+            for tf in timeframes:
+                lines.append(f"*{tf}*")
+
+                for label, delta in periods:
+                    cutoff = now - delta
+                    completed_signals = session.query(Signal) \
+                        .filter(Signal.timeframe == tf,
+                                Signal.hit_timestamp != None,
+                                Signal.hit_timestamp > cutoff,
+                                Signal.hit.in_(["SUCCESS", "FAILURE", "BREAKEVEN"])) \
+                        .all()
+
+                    if not completed_signals:
+                        lines.append(f"  {label}: 0W/0BE/0L   (0.0%)   | P&L: +0.0%")
+                        continue
+
+                    total = len(completed_signals)
+                    total_pnl = 0.0
+                    full_success = 0
+                    partial_success = 0
+                    failures = 0
+
+                    for signal in completed_signals:
+                        if signal.hit == "SUCCESS":
+                            if signal.side == "LONG":
+                                profit_pct = (signal.take_profit_2 - signal.price) / signal.price * 100
+                            else:
+                                profit_pct = (signal.price - signal.take_profit_2) / signal.price * 100
+                            total_pnl += profit_pct
+                            full_success += 1
+
+                        elif signal.hit == "BREAKEVEN":
+                            if signal.side == "LONG":
+                                tp1_profit_pct = (signal.take_profit_1 - signal.price) / signal.price * 100
+                            else:
+                                tp1_profit_pct = (signal.price - signal.take_profit_1) / signal.price * 100
+                            partial_pnl = (tp1_profit_pct * 0.5) - (0.1 * 0.5)
+                            total_pnl += partial_pnl
+                            partial_success += 1
+
+                        elif signal.hit == "FAILURE":
+                            if signal.side == "LONG":
+                                loss_pct = (signal.stop_loss - signal.price) / signal.price * 100
+                            else:
+                                loss_pct = (signal.price - signal.stop_loss) / signal.price * 100
+                            total_pnl += loss_pct
+                            failures += 1
+
+                    win_rate = ((full_success + partial_success) / total * 100) if total else 0.0
+
+                    # Format with padding for alignment
+                    lines.append(
+                        f"  {label}: {full_success}W/{partial_success}BE/{failures}L   "
+                        f"({win_rate:.1f}%)  | "
+                        f"P&L: {total_pnl:+.1f}%"
+                    )
+
+                lines.append("")  # Empty line between timeframes
+
     # Add legend at the end
-    lines.extend(["", "Legend: W=Win(TP2) BE=Breakeven(TP1) L=Loss"])
+    lines.append("*Legend:* W=Win(TP2) BE=Breakeven(TP1) L=Loss")
 
     summary = "\n".join(lines)
     logger.info(f"Trading performance summary:\n{summary}")
