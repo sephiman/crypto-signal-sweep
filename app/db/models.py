@@ -43,6 +43,8 @@ class Signal(Base):
     stoch_d = Column(Float, nullable=True)
     atr = Column(Float, nullable=True)
     atr_pct = Column(Float, nullable=True)
+    bb_width = Column(Float, nullable=True)
+    bb_width_prev = Column(Float, nullable=True)
     regime = Column(String, nullable=True)
     htf_used = Column(Boolean, nullable=False, default=False)
     volume_ratio = Column(Float, nullable=True, default=1.0)
@@ -71,7 +73,9 @@ class MarketAnalysis(Base):
     atr = Column(Float, nullable=False)
     atr_pct = Column(Float, nullable=False)
     volume_ratio = Column(Float, nullable=False)
-    
+    bb_width = Column(Float, nullable=True)
+    bb_width_prev = Column(Float, nullable=True)
+
     # Gate conditions (boolean checks)
     rsi_ok_long = Column(Boolean, nullable=False)
     rsi_ok_short = Column(Boolean, nullable=False)
@@ -92,6 +96,7 @@ class MarketAnalysis(Base):
     volume_pass = Column(Boolean, nullable=False)
     atr_pass = Column(Boolean, nullable=False)
     time_pass = Column(Boolean, nullable=False)
+    bb_pass = Column(Boolean, nullable=True)
     
     # Scores and regime
     long_score = Column(Integer, nullable=False)

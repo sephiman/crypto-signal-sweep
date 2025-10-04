@@ -4,6 +4,7 @@ import logging
 import requests
 
 from app.config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_MARKET_CHAT_ID
+from app.db.tracker import get_pair_winrate
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,10 @@ def send_alerts(signals, chat_id=None):
 
             confidence_emoji = "🔥" if s.get('confidence') == 'HIGH' else "⚡"
 
+            # Get winrate for this pair
+            winrate = get_pair_winrate(s['pair'])
+            winrate_text = f" | *WR:* {winrate:.1f}%" if winrate is not None else ""
+
             tp_text = f"🎯 *TP1:* {s['take_profit_1']:.6f} | *TP2:* {s['take_profit_2']:.6f}"
             rr_text = f"📊 *RR:* {rr_ratio_tp1:.1f}:1 / {rr_ratio_tp2:.1f}:1"
             strategy_note = "\n💡 *Strategy:* Partial profit at TP1, SL to BE"
@@ -44,7 +49,7 @@ def send_alerts(signals, chat_id=None):
                 f"\n{confidence_emoji} *{s['pair']}* | {s['timeframe']} | *{s['side']}*"
                 f"\n💰 *Entry:* {s['price']:.6f}"
                 f"\n🛑 *SL:* {s['stop_loss']:.6f} | {tp_text}"
-                f"\n{rr_text} | *Score:* {s.get('score', '?')}/{s.get('required_score', '?')}"
+                f"\n{rr_text} | *Score:* {s.get('score', '?')}/{s.get('required_score', '?')}{winrate_text}"
                 f"\n📈 *RSI:* {s.get('rsi', 0):.1f} | *ADX:* {s.get('adx', 0):.1f}"
                 f"\n🔄 *Volume:* {s.get('volume_ratio', 1.0):.1f}x | *Confidence:* {s.get('confidence', 'MEDIUM')}{strategy_note}"
                 f"\n⏰ {s['timestamp']:%H:%M UTC}"

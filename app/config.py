@@ -13,12 +13,12 @@ DYNAMIC_SCORE_ENABLED = os.getenv("DYNAMIC_SCORE_ENABLED", "true").lower() == "t
 # global score settings
 MIN_SCORE_DEFAULT = int(os.getenv("MIN_SCORE_DEFAULT", 5))
 MIN_SCORE_TRENDING = int(os.getenv("MIN_SCORE_TRENDING", 5))
-MIN_SCORE_RANGING = int(os.getenv("MIN_SCORE_RANGING", 4))
+MIN_SCORE_RANGING = int(os.getenv("MIN_SCORE_RANGING", 5))
 
 # Timeframe-specific minimum score requirements
 TIMEFRAME_MIN_SCORES = {
-    "1m": 3,
-    "5m": 4,
+    "1m": 4,
+    "5m": 5,
     "15m": 5,
     "1h": 6,
     "4h": 7,
@@ -32,14 +32,14 @@ ADX_RSI_MODE = os.getenv("ADX_RSI_MODE", "adx").lower()
 
 # RSI Configuration for Ranging Markets (standard oversold/overbought)
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", 14))
-RSI_OVERSOLD = float(os.getenv("RSI_OVERSOLD", 28))
-RSI_OVERBOUGHT = float(os.getenv("RSI_OVERBOUGHT", 72))
+RSI_OVERSOLD = float(os.getenv("RSI_OVERSOLD", 35))
+RSI_OVERBOUGHT = float(os.getenv("RSI_OVERBOUGHT", 65))
 RSI_MOMENTUM = float(os.getenv("RSI_MOMENTUM", 50))
 
 # RSI Configuration for Trending Markets (when ADX_RSI_MODE="adx" and ADX >= threshold)
 # Option 1: Use more extreme levels in trends (default)
-RSI_TRENDING_OVERSOLD = float(os.getenv("RSI_TRENDING_OVERSOLD", 30))  # More extreme for trends
-RSI_TRENDING_OVERBOUGHT = float(os.getenv("RSI_TRENDING_OVERBOUGHT", 70))  # More extreme for trends
+RSI_TRENDING_OVERSOLD = float(os.getenv("RSI_TRENDING_OVERSOLD", 35))
+RSI_TRENDING_OVERBOUGHT = float(os.getenv("RSI_TRENDING_OVERBOUGHT", 65))
 
 # Option 2: Use momentum pullback levels (alternative approach)
 # Set RSI_TRENDING_MODE to "pullback" to look for mild pullbacks in trends instead of extremes
@@ -61,9 +61,15 @@ EMA_MIN_DIFF_ENABLED = os.getenv("EMA_MIN_DIFF_ENABLED", "true").lower() == "tru
 # Stochastic Oscillator Configuration
 STOCH_K_PERIOD = int(os.getenv("STOCH_K_PERIOD", 14))  # %K period
 STOCH_D_PERIOD = int(os.getenv("STOCH_D_PERIOD", 3))   # %D period (smoothing)
-STOCH_OVERSOLD = float(os.getenv("STOCH_OVERSOLD", 20))
-STOCH_OVERBOUGHT = float(os.getenv("STOCH_OVERBOUGHT", 80))
+STOCH_OVERSOLD = float(os.getenv("STOCH_OVERSOLD", 30))
+STOCH_OVERBOUGHT = float(os.getenv("STOCH_OVERBOUGHT", 70))
 STOCH_ENABLED = os.getenv("STOCH_ENABLED", "true").lower() == "true"
+
+# Bollinger Bands Configuration
+BB_PERIOD = int(os.getenv("BB_PERIOD", 20))
+BB_STD_DEV = float(os.getenv("BB_STD_DEV", 2.0))
+BB_WIDTH_MIN = float(os.getenv("BB_WIDTH_MIN", 0.02))
+BB_ENABLED = os.getenv("BB_ENABLED", "true").lower() == "true"
 
 DB_ENABLED = os.getenv("DB_ENABLED", "false").lower() == "true"
 DB_URL = (

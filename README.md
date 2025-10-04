@@ -17,6 +17,8 @@ A sophisticated algorithmic trading signal generator that scans multiple cryptoc
 ### **Advanced Features**
 - 🔥 **Volume Confirmation**: Only trades with 1.15x+ average volume spikes
 - ⏰ **Time-Based Filtering**: Configurable timezone filtering (default: skip 00:00-07:00 CEST)
+- 📊 **Bollinger Band Width Filter**: Only signals when volatility is expanding (prevents dead market trades)
+- 🎯 **Per-Pair Win Rate Tracking**: Historical win rate displayed for each pair in signals
 - 🧠 **Enhanced Regime Detection**: Stricter ADX thresholds (28+) for trend confirmation
 - 📊 **Dynamic Risk-Reward**: Automatic 2:1+ RR ratios with ATR-based optimization
 - 🎯 **Confidence Scoring**: HIGH/MEDIUM confidence levels for signal prioritization
@@ -35,6 +37,7 @@ A sophisticated algorithmic trading signal generator that scans multiple cryptoc
   - **EMA**: Dynamic separation requirements based on ATR volatility
   - **ADX**: Enhanced trend strength detection (28+ threshold)
   - **Stochastic Oscillator**: Momentum indicator for overbought/oversold conditions
+  - **Bollinger Bands**: Width expansion filter to avoid low volatility periods
 - 🎯 **Smart Entry Logic**: Requires multiple confirmation gates for signal generation
 - 📊 **Dynamic Scoring**: Adaptive requirements based on market regime (trending vs ranging)
 
@@ -301,11 +304,17 @@ The system first determines market regime using ADX:
 - **SHORT**: EMA Fast (9) < EMA Slow (21) + minimum ATR-based separation
 - If `EMA_MIN_DIFF_ENABLED=false`, only direction matters
 
-#### **6. Volume Confirmation**
+#### **6. Bollinger Bands Width Filter**
+- **BB Width**: Must be expanding (current > previous candle)
+- **BB Minimum**: Width must be ≥ 2% of price (configurable via `BB_WIDTH_MIN`)
+- **Purpose**: Avoids signals in low-volatility, "dead" markets
+- Disabled if `BB_ENABLED=false`
+
+#### **7. Volume Confirmation**
 - Current volume must be ≥ 1.15x the 20-period average volume
 - Disabled if `VOLUME_CONFIRMATION_ENABLED=false`
 
-#### **7. Optional Filters**
+#### **8. Optional Filters**
 
 **Higher Timeframe Confirmation** (if enabled):
 - Maps to higher TF: 15m→1h, 1h→4h, 4h→1d
@@ -361,12 +370,21 @@ All signals include two take profit levels:
 ```
 🔥 BTC/USDT | 1h | LONG
 💰 Entry: 43,250.00
-🛑 SL: 42,730.00 | 🎯 TP: 44,290.00
-📊 RR: 2.0:1 | Score: 6/5
+🛑 SL: 42,730.00 | 🎯 TP1: 43,770.00 | TP2: 44,290.00
+📊 RR: 1.0:1 / 2.0:1 | Score: 6/5 | WR: 62.5%
 📈 RSI: 23.5 | ADX: 31.2
 🔄 Volume: 1.8x | Confidence: HIGH
+💡 Strategy: Partial profit at TP1, SL to BE
 ⏰ 14:30 UTC
+🆔 abc123def456
 ```
+
+**New Features:**
+- **Dual Take Profit (TP1/TP2)**: Separate targets for partial profit and full exit
+- **Dual RR Ratios**: Shows risk-reward for both TP1 and TP2
+- **Win Rate (WR)**: Historical win rate for the specific pair (calculated from database)
+- **Trading Strategy**: Reminds trader to move SL to breakeven after TP1 hit
+- **Signal UUID**: Unique identifier for tracking signal performance
 
 ### **Market Summary** *(New in v2.0)*
 Automated hourly market overview showing trend direction and signal readiness:
@@ -436,6 +454,23 @@ EMA_MIN_DIFF_ENABLED=true     # Dynamic separation based on ATR
 ```bash
 ADX_PERIOD=14
 ADX_THRESHOLD=28              # Threshold for trending vs ranging markets
+```
+
+#### **Stochastic Oscillator Configuration**
+```bash
+STOCH_K_PERIOD=14             # %K period
+STOCH_D_PERIOD=3              # %D period (smoothing)
+STOCH_OVERSOLD=30             # Oversold threshold
+STOCH_OVERBOUGHT=70           # Overbought threshold
+STOCH_ENABLED=true            # Enable/disable stochastic filter
+```
+
+#### **Bollinger Bands Configuration**
+```bash
+BB_PERIOD=20                  # Bollinger Band period (standard)
+BB_STD_DEV=2.0                # Standard deviations (standard)
+BB_WIDTH_MIN=0.02             # Minimum BB width (2% of price)
+BB_ENABLED=true               # Enable/disable BB width filter
 ```
 
 ### **Risk Management**

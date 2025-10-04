@@ -6,7 +6,7 @@ import ccxt
 import pandas as pd
 from ta.momentum import RSIIndicator, StochasticOscillator
 from ta.trend import MACD
-from ta.volatility import AverageTrueRange
+from ta.volatility import AverageTrueRange, BollingerBands
 
 from app.config import (
     USE_HIGHER_TF_CONFIRM, HIGHER_TF_MAP,
@@ -20,7 +20,7 @@ from app.config import (
     MIN_SCORE_TRENDING, TIME_FILTER_ENABLED, TIME_FILTER_TIMEZONE, AVOID_HOURS_START, AVOID_HOURS_END,
     VOLUME_CONFIRMATION_ENABLED, RSI_TRENDING_MODE, RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
     RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT, STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_OVERSOLD, STOCH_OVERBOUGHT,
-    STOCH_ENABLED,
+    STOCH_ENABLED, BB_PERIOD, BB_STD_DEV, BB_WIDTH_MIN, BB_ENABLED,
     get_min_score_for_timeframe, get_volume_ratio_for_timeframe, get_adx_threshold_for_timeframe
 )
 
@@ -32,7 +32,7 @@ from app.db.tracker import save_market_analysis
 
 class TechnicalIndicators:
     """Container for all calculated technical indicators"""
-    def __init__(self, rsi, macd, signal_line, diff, ema_fast, ema_slow, atr, atr_pct, adx, stoch_k, stoch_d, volume_ratio):
+    def __init__(self, rsi, macd, signal_line, diff, ema_fast, ema_slow, atr, atr_pct, adx, stoch_k, stoch_d, volume_ratio, bb_width, bb_width_prev):
         self.rsi = rsi
         self.macd = macd
         self.signal_line = signal_line
@@ -45,6 +45,8 @@ class TechnicalIndicators:
         self.stoch_k = stoch_k
         self.stoch_d = stoch_d
         self.volume_ratio = volume_ratio
+        self.bb_width = bb_width
+        self.bb_width_prev = bb_width_prev
 
 
 class MarketConditions:
@@ -52,7 +54,7 @@ class MarketConditions:
     def __init__(self, rsi_ok_long, rsi_ok_short, momentum_ok_long, momentum_ok_short,
                  ema_ok_long, ema_ok_short, trend_ok_long, trend_ok_short,
                  stoch_ok_long, stoch_ok_short, confirm_long, confirm_short,
-                 volume_pass, atr_pass, is_trending):
+                 volume_pass, atr_pass, is_trending, bb_pass):
         self.rsi_ok_long = rsi_ok_long
         self.rsi_ok_short = rsi_ok_short
         self.momentum_ok_long = momentum_ok_long
@@ -68,17 +70,13 @@ class MarketConditions:
         self.volume_pass = volume_pass
         self.atr_pass = atr_pass
         self.is_trending = is_trending
+        self.bb_pass = bb_pass
 
 
 def analyze_market(pairs, timeframe):
     """
     Market analysis with improved filtering and scoring
     """
-    # Add time filter check
-    if TIME_FILTER_ENABLED and not _is_valid_trading_time():
-        logger.info(f"Skipping analysis - outside valid trading hours")
-        return []
-
     df = _fetch_ohlcv_df(pairs, timeframe)
     signals = []
 
@@ -107,8 +105,8 @@ def analyze_market(pairs, timeframe):
             _log_and_save_analysis(pair, timeframe, price, status, result, long_score, short_score,
                                  min_score, indicators, conditions, side)
 
-            # Skip if filters don't pass
-            if not conditions.atr_pass or not conditions.volume_pass or side == "NONE":
+            # Skip if filters don't pass or signal generation not allowed
+            if not conditions.atr_pass or not conditions.volume_pass or side == "NONE" or status != "✅ SIGNAL":
                 continue
 
             # Generate and add signal
@@ -152,13 +150,13 @@ def _is_valid_trading_time():
         return True
 
     import zoneinfo
-    
+
     # Get current time in configured timezone
     try:
         target_tz = zoneinfo.ZoneInfo(TIME_FILTER_TIMEZONE)
         current_time = datetime.datetime.now(target_tz)
         current_hour = current_time.hour
-        
+
         return not (AVOID_HOURS_START <= current_hour < AVOID_HOURS_END)
     except Exception as e:
         logger.warning(f"Invalid timezone {TIME_FILTER_TIMEZONE}, falling back to UTC: {e}")
@@ -305,8 +303,25 @@ def _calculate_technical_indicators(data, price):
     else:
         stoch_k = stoch_d = 50  # Neutral values when disabled
 
+    # Bollinger Bands Width calculation
+    if BB_ENABLED and len(data) >= BB_PERIOD + 1:
+        bb_obj = BollingerBands(
+            close=data['close'],
+            window=BB_PERIOD,
+            window_dev=BB_STD_DEV
+        )
+        bb_upper = bb_obj.bollinger_hband()
+        bb_lower = bb_obj.bollinger_lband()
+
+        # Calculate BB width as percentage: (upper - lower) / price
+        bb_width_series = (bb_upper - bb_lower) / data['close']
+        bb_width = bb_width_series.iloc[-1]
+        bb_width_prev = bb_width_series.iloc[-2]
+    else:
+        bb_width = bb_width_prev = 0.0  # Neutral values when disabled
+
     return TechnicalIndicators(rsi, macd, signal_line, diff, ema_fast, ema_slow,
-                             atr, atr_pct, adx, stoch_k, stoch_d, volume_ratio)
+                             atr, atr_pct, adx, stoch_k, stoch_d, volume_ratio, bb_width, bb_width_prev)
 
 
 def _calculate_market_conditions(data, indicators, timeframe, pair):
@@ -384,10 +399,19 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
     else:
         confirm_long = confirm_short = True
 
+    # Bollinger Bands Width filter
+    if BB_ENABLED:
+        # Check if BB width is expanding (current > previous) AND above minimum threshold
+        bb_expanding = indicators.bb_width > indicators.bb_width_prev
+        bb_above_min = indicators.bb_width >= BB_WIDTH_MIN
+        bb_pass = bb_expanding and bb_above_min
+    else:
+        bb_pass = True  # Allow signals when disabled
+
     return MarketConditions(rsi_ok_long, rsi_ok_short, momentum_ok_long, momentum_ok_short,
                           ema_ok_long, ema_ok_short, trend_ok_long, trend_ok_short,
                           stoch_ok_long, stoch_ok_short, confirm_long, confirm_short,
-                          volume_pass, atr_pass, is_trending)
+                          volume_pass, atr_pass, is_trending, bb_pass)
 
 
 def _calculate_scores(indicators, conditions, timeframe):
@@ -461,9 +485,20 @@ def _determine_signal_side(long_score, short_score, min_score, conditions, indic
     elif not conditions.atr_pass:
         status = "⏭️ SKIP"
         result = f"LOW_ATR({indicators.atr_pct:.3%}<{MIN_ATR_RATIO:.3%})"
+    elif not conditions.bb_pass:
+        status = "⏭️ SKIP"
+        if indicators.bb_width < BB_WIDTH_MIN:
+            result = f"BB_LOW_WIDTH({indicators.bb_width:.3%}<{BB_WIDTH_MIN:.3%})"
+        else:
+            result = f"BB_NOT_EXPANDING({indicators.bb_width:.3%}<={indicators.bb_width_prev:.3%})"
     elif side != "NONE":
-        status = "✅ SIGNAL"
-        result = side
+        # Check time filter only when we have a valid signal
+        if TIME_FILTER_ENABLED and not _is_valid_trading_time():
+            status = "⏭️ SKIP"
+            result = f"{side}_TIME_FILTER"
+        else:
+            status = "✅ SIGNAL"
+            result = side
     else:
         status = "⏭️ SKIP"
         result = none_reason if 'none_reason' in locals() else "NO_SIGNAL"
@@ -513,6 +548,8 @@ def _log_and_save_analysis(pair, timeframe, price, status, result, long_score, s
         "atr": indicators.atr,
         "atr_pct": indicators.atr_pct,
         "volume_ratio": indicators.volume_ratio,
+        "bb_width": indicators.bb_width,
+        "bb_width_prev": indicators.bb_width_prev,
         "rsi_ok_long": conditions.rsi_ok_long,
         "rsi_ok_short": conditions.rsi_ok_short,
         "macd_ok_long": indicators.macd > indicators.signal_line,
@@ -530,6 +567,7 @@ def _log_and_save_analysis(pair, timeframe, price, status, result, long_score, s
         "volume_pass": conditions.volume_pass,
         "atr_pass": conditions.atr_pass,
         "time_pass": True,  # We already filtered for time above
+        "bb_pass": conditions.bb_pass,
         "long_score": long_score,
         "short_score": short_score,
         "min_score_required": min_score,
@@ -597,6 +635,8 @@ def _generate_signal_details(pair, timeframe, side, price, indicators, condition
         "stoch_d": indicators.stoch_d,
         "atr": indicators.atr,
         "atr_pct": indicators.atr_pct,
+        "bb_width": indicators.bb_width,
+        "bb_width_prev": indicators.bb_width_prev,
         "regime": "momentum" if indicators.adx >= get_adx_threshold_for_timeframe(timeframe) else "mean-reversion",
         "htf_used": USE_HIGHER_TF_CONFIRM,
         "volume_ratio": indicators.volume_ratio,

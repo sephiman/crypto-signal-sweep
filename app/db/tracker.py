@@ -540,3 +540,26 @@ def has_recent_pending(pair: str, timeframe: str, cooldown_minutes: int, session
         .limit(1)
     )
     return session.execute(q).first() is not None
+
+
+def get_pair_winrate(pair: str) -> Optional[float]:
+    """
+    Calculate winrate for a specific pair across all timeframes.
+    Returns winrate as a percentage (0-100) or None if no data.
+    """
+    if not DB_ENABLED:
+        return None
+
+    with Session(engine) as session:
+        completed_signals = session.query(Signal).filter(
+            Signal.pair == pair,
+            Signal.hit.in_(["SUCCESS", "FAILURE", "BREAKEVEN"])
+        ).all()
+
+        if not completed_signals:
+            return None
+
+        total = len(completed_signals)
+        wins = sum(1 for s in completed_signals if s.hit in ["SUCCESS", "BREAKEVEN"])
+
+        return (wins / total * 100) if total > 0 else None
