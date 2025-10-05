@@ -5,14 +5,17 @@ from apscheduler.triggers.cron import CronTrigger
 
 from app.config import (
     TIMEFRAMES, RUN_AT_START, MARKET_SUMMARY_ENABLED,
-    BACKTEST_MODE, COLLECT_HISTORICAL_DATA, PAIRS
+    BACKTEST_MODE, COLLECT_HISTORICAL_DATA, PAIRS, BACKTEST_LOG_LEVEL
 )
 from app.config import tf_to_minutes
 from app.jobs import run_analysis_job, run_midnight_summary_job, run_hit_polling_job, run_market_summary_job
 from app.exception_notifier import setup_exception_notification
 
+# Set logging level based on mode (reduced logging for backtest)
+log_level = getattr(logging, BACKTEST_LOG_LEVEL) if BACKTEST_MODE else logging.INFO
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 

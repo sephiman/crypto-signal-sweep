@@ -136,6 +136,8 @@ BACKTEST_MODE = os.getenv("BACKTEST_MODE", "false").lower() == "true"
 BACKTEST_START_DATE = os.getenv("BACKTEST_START_DATE", "2024-01-01")  # Format: YYYY-MM-DD
 BACKTEST_END_DATE = os.getenv("BACKTEST_END_DATE", "2024-12-31")  # Format: YYYY-MM-DD
 COLLECT_HISTORICAL_DATA = os.getenv("COLLECT_HISTORICAL_DATA", "false").lower() == "true"
+SAVE_MARKET_ANALYSIS = os.getenv("SAVE_MARKET_ANALYSIS", "true").lower() == "true"  # Disable in backtest for speed
+BACKTEST_LOG_LEVEL = os.getenv("BACKTEST_LOG_LEVEL", "WARNING").upper()  # Set to WARNING/ERROR to reduce logging during backtest
 
 def tf_to_minutes(tf: str) -> int:
     m = re.match(r"(\d+)([mh])", tf)

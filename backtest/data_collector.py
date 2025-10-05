@@ -4,14 +4,15 @@ Fetches 1m OHLCV data from Binance and stores in database.
 """
 import logging
 import time
-import ccxt
-import pandas as pd
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
-from app.db.models import HistoricalOHLCV
-from app.db.database import SessionLocal
 from typing import List
+
+import ccxt
+from sqlalchemy import and_
+from sqlalchemy.orm import Session
+
+from app.db.database import SessionLocal
+from app.db.models import HistoricalOHLCV
 
 logger = logging.getLogger(__name__)
 
@@ -194,42 +195,50 @@ class DataCollector:
         Returns:
             Number of candles stored
         """
-        stored = 0
+        if not candles:
+            return 0
 
+        # Extract all timestamps from incoming candles
+        timestamps = [datetime.utcfromtimestamp(c[0] / 1000) for c in candles]
+
+        # Batch check which timestamps already exist (single query instead of N queries)
+        existing_timestamps = set(
+            row[0] for row in db.query(HistoricalOHLCV.timestamp).filter(
+                and_(
+                    HistoricalOHLCV.pair == pair,
+                    HistoricalOHLCV.timestamp.in_(timestamps)
+                )
+            ).all()
+        )
+
+        # Prepare bulk insert for new records only
+        new_records = []
         for candle in candles:
             timestamp = datetime.utcfromtimestamp(candle[0] / 1000)
 
-            # Check if candle already exists
-            exists = db.query(HistoricalOHLCV).filter(
-                and_(
-                    HistoricalOHLCV.pair == pair,
-                    HistoricalOHLCV.timestamp == timestamp
-                )
-            ).first()
-
-            if exists:
+            # Skip if already exists
+            if timestamp in existing_timestamps:
                 continue
 
-            # Create new record
-            record = HistoricalOHLCV(
-                pair=pair,
-                timeframe='1m',
-                timestamp=timestamp,
-                open=float(candle[1]),
-                high=float(candle[2]),
-                low=float(candle[3]),
-                close=float(candle[4]),
-                volume=float(candle[5])
+            new_records.append(
+                HistoricalOHLCV(
+                    pair=pair,
+                    timeframe='1m',
+                    timestamp=timestamp,
+                    open=float(candle[1]),
+                    high=float(candle[2]),
+                    low=float(candle[3]),
+                    close=float(candle[4]),
+                    volume=float(candle[5])
+                )
             )
 
-            db.add(record)
-            stored += 1
-
-        # Commit in batches
-        if stored > 0:
+        # Bulk insert all new records
+        if new_records:
+            db.bulk_save_objects(new_records)
             db.commit()
 
-        return stored
+        return len(new_records)
 
     def _check_rate_limit(self):
         """Check and enforce rate limits"""

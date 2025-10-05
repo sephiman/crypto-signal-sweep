@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 _backtest_data_cache = {}
 _backtest_current_timestamp = None
 
+# Global exchange instance for live mode (reused across calls)
+_exchange = ccxt.binance() if not BACKTEST_MODE else None
+
 
 def set_backtest_data(data_cache: dict):
     """Set the backtest data cache (called by backtest engine)"""
@@ -49,7 +52,12 @@ def get_current_price(pair: str, timestamp: Optional[datetime] = None) -> float:
         if pair not in _backtest_data_cache:
             raise ValueError(f"No backtest data available for {pair}")
 
-        df = _backtest_data_cache[pair]
+        # Access the 1m DataFrame from the cache structure
+        pair_data = _backtest_data_cache[pair]
+        df = pair_data.get('1m')
+
+        if df is None:
+            raise ValueError(f"No 1m data available for {pair}")
 
         # Find the closest candle at or before the timestamp
         df_filtered = df[df['timestamp'] <= ts]
@@ -60,8 +68,7 @@ def get_current_price(pair: str, timestamp: Optional[datetime] = None) -> float:
         return float(df_filtered.iloc[-1]['close'])
     else:
         # Live mode: fetch from exchange
-        exchange = ccxt.binance()
-        ticker = exchange.fetch_ticker(pair)
+        ticker = _exchange.fetch_ticker(pair)
         return float(ticker["last"])
 
 
@@ -83,73 +90,36 @@ def fetch_ohlcv(pair: str, timeframe: str, limit: Optional[int] = None) -> List[
         if ts is None:
             raise ValueError("Backtest mode requires timestamp to be set")
 
-        # Get 1m data for the pair
+        # Get pre-computed timeframe data for the pair
         if pair not in _backtest_data_cache:
             raise ValueError(f"No backtest data available for {pair}")
 
-        df_1m = _backtest_data_cache[pair]
+        pair_data = _backtest_data_cache[pair]
+
+        # Get the requested timeframe (skip the '1m_indexed' dict)
+        if timeframe in pair_data and timeframe != '1m_indexed':
+            df = pair_data[timeframe]
+        else:
+            raise ValueError(f"Timeframe {timeframe} not pre-computed for {pair}")
+
+        # Ensure timestamp is a column (not index)
+        if 'timestamp' not in df.columns:
+            # If timestamp is the index, reset it
+            df = df.reset_index()
 
         # Filter data up to current timestamp (no look-ahead bias)
-        df_1m = df_1m[df_1m['timestamp'] <= ts].copy()
+        df_filtered = df[df['timestamp'] <= ts].copy()
 
-        if df_1m.empty:
+        if df_filtered.empty:
+            logger.debug(f"{pair}: No {timeframe} data up to {ts}")
             return []
 
-        # If timeframe is 1m, return as-is
-        if timeframe == '1m':
-            result = df_1m[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
-            # Convert timestamp to milliseconds
-            result = [[int(row[0].timestamp() * 1000)] + row[1:] for row in result]
-            if limit:
-                result = result[-limit:]
-            return result
+        logger.debug(f"{pair}: Have {len(df_filtered)} {timeframe} candles up to {ts}")
 
-        # Aggregate to requested timeframe using pandas resample
-        df_1m = df_1m.set_index('timestamp')
-
-        # Map timeframe to pandas offset
-        tf_map = {
-            '5m': '5T',
-            '15m': '15T',
-            '1h': '1H',
-            '4h': '4H',
-            '1d': '1D',
-            '1w': '1W'
-        }
-
-        if timeframe not in tf_map:
-            raise ValueError(f"Unsupported timeframe: {timeframe}")
-
-        offset = tf_map[timeframe]
-
-        # Resample with proper alignment
-        # origin='start' ensures bars align with Binance timing
-        # label='left' puts the timestamp at the start of the interval
-        # closed='left' includes the left edge but not the right
-        df_resampled = df_1m.resample(
-            offset,
-            origin='start',
-            label='left',
-            closed='left'
-        ).agg({
-            'open': 'first',
-            'high': 'max',
-            'low': 'min',
-            'close': 'last',
-            'volume': 'sum'
-        }).dropna()
-
-        # Convert back to list format
-        result = []
-        for ts_idx, row in df_resampled.iterrows():
-            result.append([
-                int(ts_idx.timestamp() * 1000),  # timestamp in ms
-                float(row['open']),
-                float(row['high']),
-                float(row['low']),
-                float(row['close']),
-                float(row['volume'])
-            ])
+        # Convert to list format
+        result = df_filtered[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
+        # Convert timestamp to milliseconds
+        result = [[int(row[0].timestamp() * 1000)] + row[1:] for row in result]
 
         if limit:
             result = result[-limit:]
@@ -157,8 +127,7 @@ def fetch_ohlcv(pair: str, timeframe: str, limit: Optional[int] = None) -> List[
         return result
     else:
         # Live mode: fetch from exchange
-        exchange = ccxt.binance()
-        candles = exchange.fetch_ohlcv(pair, timeframe, limit=limit)
+        candles = _exchange.fetch_ohlcv(pair, timeframe, limit=limit)
         return candles
 
 
@@ -176,15 +145,32 @@ def fetch_ohlcv_df(pairs: List[str], timeframe: str) -> dict:
     """
     result = {}
     for pair in pairs:
-        candles = fetch_ohlcv(pair, timeframe)
-        df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        try:
+            candles = fetch_ohlcv(pair, timeframe)
 
-        # In live mode, drop the incomplete candle
-        # In backtest mode, we already filtered to only complete candles
-        if not BACKTEST_MODE and len(df) > 1:
-            df = df.iloc[:-1]
+            if not candles:
+                # Silently skip - normal during backtest warmup period
+                logger.debug(f"No data available for {pair} on {timeframe} (warmup period)")
+                continue
 
-        result[pair] = df
+            df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+
+            # In live mode, drop the incomplete candle
+            # In backtest mode, we already filtered to only complete candles
+            if not BACKTEST_MODE and len(df) > 1:
+                df = df.iloc[:-1]
+
+            result[pair] = df
+
+        except ValueError as e:
+            # Backtest mode: pair not in cache or no data at timestamp
+            # Silently skip during warmup period
+            logger.debug(f"Skipping {pair} on {timeframe}: {e}")
+            continue
+        except Exception as e:
+            # Unexpected errors only
+            logger.warning(f"Error fetching data for {pair} on {timeframe}: {e}")
+            continue
 
     return result

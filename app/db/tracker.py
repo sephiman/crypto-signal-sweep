@@ -503,8 +503,10 @@ def save_signal(signal: Dict) -> None:
 
 
 def save_market_analysis(analysis_data: Dict) -> None:
-    """Insert a new MarketAnalysis row, skipping if DB disabled."""
-    if not DB_ENABLED:
+    """Insert a new MarketAnalysis row, skipping if DB disabled or flag is off."""
+    from app.config import SAVE_MARKET_ANALYSIS
+
+    if not DB_ENABLED or not SAVE_MARKET_ANALYSIS:
         return
 
     # Clean up any numpy types in the payload
