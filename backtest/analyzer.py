@@ -2,16 +2,16 @@
 Backtest performance analyzer.
 Analyzes backtest results and generates comprehensive reports.
 """
-import logging
 import json
-import pandas as pd
-import numpy as np
+import logging
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import and_
-from app.db.models import BacktestRun, BacktestSignal
-from app.db.database import SessionLocal
+
+import pandas as pd
+
 import app.config as config
+from app.db.database import SessionLocal
+from app.db.models import BacktestRun, BacktestSignal
 
 logger = logging.getLogger(__name__)
 
@@ -88,8 +88,8 @@ class BacktestAnalyzer:
         logger.info("\n--- OVERALL PERFORMANCE ---")
         logger.info(f"Total Trades: {self.run.total_trades or 0}")
         logger.info(f"Winners (TP2): {self.run.total_winners or 0}")
+        logger.info(f"Partial Winners (TP1): {self.run.total_breakeven or 0}")  # TP1 stored in breakeven field
         logger.info(f"Losers (SL): {self.run.total_losers or 0}")
-        logger.info(f"Breakeven: {self.run.total_breakeven or 0}")
         logger.info(f"Win Rate: {self.run.win_rate or 0:.2f}%")
         logger.info(f"Total PnL: {self.run.total_pnl or 0:.2f}%")
         logger.info(f"Avg PnL per Trade: {self.run.avg_pnl_per_trade or 0:.2f}%")
@@ -182,13 +182,13 @@ class BacktestAnalyzer:
             total = len(group)
             winners = len(group[group['hit'] == 'TP2'])
             losers = len(group[group['hit'] == 'SL'])
-            breakeven = len(group[group['hit'] == 'BREAKEVEN'])
+            tp1_wins = len(group[group['hit'] == 'TP1'])
             win_rate = (winners / total * 100) if total > 0 else 0.0
             total_pnl = group['pnl'].sum()
             avg_pnl = group['pnl'].mean()
 
             logger.info(
-                f"{name:15} | Trades: {total:4} | W: {winners:3} | L: {losers:3} | BE: {breakeven:3} | "
+                f"{name:15} | Trades: {total:4} | TP2: {winners:3} | TP1: {tp1_wins:3} | SL: {losers:3} | "
                 f"WR: {win_rate:5.1f}% | Total PnL: {total_pnl:7.2f}% | Avg: {avg_pnl:6.2f}%"
             )
 

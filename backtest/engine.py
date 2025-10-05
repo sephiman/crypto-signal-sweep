@@ -379,16 +379,16 @@ class BacktestEngine:
                         keys_to_remove.append(key)
                         self.completed_signals.append(record)
                         logger.info(f"✅ {pair} LONG: TP2 hit at {current_time}, PnL: {record.pnl_percent:.2f}%")
-                    # Check BE SL (after TP1)
+                    # Check BE SL (after TP1) - TP1 was already hit, so count as TP1 profit
                     elif low <= entry:
-                        # Breakeven
-                        record.hit = 'BREAKEVEN'
+                        # TP1 was hit, now hitting breakeven = TP1 profit locked in
+                        record.hit = 'TP1'
                         record.hit_timestamp = current_time
-                        record.hit_price = entry
-                        record.pnl_percent = 0.0
+                        record.hit_price = entry  # Closed at entry (BE)
+                        record.pnl_percent = ((tp1 - entry) / entry) * 100
                         keys_to_remove.append(key)
                         self.completed_signals.append(record)
-                        logger.info(f"⚖️ {pair} LONG: BE hit at {current_time}")
+                        logger.info(f"🎯 {pair} LONG: TP1 secured (closed at BE) at {current_time}, PnL: {record.pnl_percent:.2f}%")
                 else:
                     # TP1 not hit yet, check original SL
                     if low <= sl:
@@ -424,16 +424,16 @@ class BacktestEngine:
                         keys_to_remove.append(key)
                         self.completed_signals.append(record)
                         logger.info(f"✅ {pair} SHORT: TP2 hit at {current_time}, PnL: {record.pnl_percent:.2f}%")
-                    # Check BE SL (after TP1)
+                    # Check BE SL (after TP1) - TP1 was already hit, so count as TP1 profit
                     elif high >= entry:
-                        # Breakeven
-                        record.hit = 'BREAKEVEN'
+                        # TP1 was hit, now hitting breakeven = TP1 profit locked in
+                        record.hit = 'TP1'
                         record.hit_timestamp = current_time
-                        record.hit_price = entry
-                        record.pnl_percent = 0.0
+                        record.hit_price = entry  # Closed at entry (BE)
+                        record.pnl_percent = ((entry - tp1) / entry) * 100
                         keys_to_remove.append(key)
                         self.completed_signals.append(record)
-                        logger.info(f"⚖️ {pair} SHORT: BE hit at {current_time}")
+                        logger.info(f"🎯 {pair} SHORT: TP1 secured (closed at BE) at {current_time}, PnL: {record.pnl_percent:.2f}%")
                 else:
                     # TP1 not hit yet, check original SL
                     if high >= sl:
@@ -452,7 +452,6 @@ class BacktestEngine:
 
         # Batch commits (commit every 50 signal updates to reduce I/O)
         if keys_to_remove:
-            logger.warning(f"🏁 Completed {len(keys_to_remove)} signals at {current_time}. Remaining active: {len(self.active_signals)}")
             self.pending_updates += len(keys_to_remove)
             if self.pending_updates >= 50:
                 db.commit()
@@ -505,14 +504,14 @@ class BacktestEngine:
             func.count(BacktestSignal.id).label('total'),
             func.sum(case((BacktestSignal.hit == 'TP2', 1), else_=0)).label('winners'),
             func.sum(case((BacktestSignal.hit == 'SL', 1), else_=0)).label('losers'),
-            func.sum(case((BacktestSignal.hit == 'BREAKEVEN', 1), else_=0)).label('breakeven'),
+            func.sum(case((BacktestSignal.hit == 'TP1', 1), else_=0)).label('tp1_wins'),  # TP1 outcomes
             func.sum(BacktestSignal.pnl_percent).label('total_pnl')
         ).filter(BacktestSignal.run_id == self.run_id).first()
 
         total_trades = stats.total or 0
         winners = stats.winners or 0
         losers = stats.losers or 0
-        breakeven = stats.breakeven or 0
+        tp1_wins = stats.tp1_wins or 0
         total_pnl = stats.total_pnl or 0.0
 
         win_rate = (winners / total_trades * 100) if total_trades > 0 else 0.0
@@ -523,7 +522,7 @@ class BacktestEngine:
         run.total_trades = total_trades
         run.total_winners = winners
         run.total_losers = losers
-        run.total_breakeven = breakeven
+        run.total_breakeven = tp1_wins
         run.win_rate = win_rate
         run.total_pnl = total_pnl
         run.avg_pnl_per_trade = avg_pnl

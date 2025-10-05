@@ -21,14 +21,21 @@ def send_alerts(signals, chat_id=None):
             chat_id = TELEGRAM_CHAT_ID
 
     if len(signals) == 1 and "summary" in signals[0]:
-        text = signals[0]['summary']
+        # Summary message - send as single message
+        _send_telegram_message(chat_id, signals[0]['summary'])
     else:
-        lines = ["🚨 *Signal Alert*"]
+        # Signal alerts - batch to avoid hitting 4096 character limit
+        MAX_MESSAGE_LENGTH = 3500  # Safe buffer under Telegram's 4096 limit
+
+        batches = []
+        current_batch = []
+        current_length = len("🚨 *Signal Alert*\n")
+
         for s in signals:
             if not all(k in s for k in ("pair", "timeframe", "side")):
                 continue
 
-            # Calculate risk-reward ratios for both TP levels
+            # Build signal text
             risk = abs(s['price'] - s['stop_loss'])
             reward_tp1 = abs(s['take_profit_1'] - s['price'])
             reward_tp2 = abs(s['take_profit_2'] - s['price'])
@@ -36,8 +43,6 @@ def send_alerts(signals, chat_id=None):
             rr_ratio_tp2 = reward_tp2 / risk if risk > 0 else 0
 
             confidence_emoji = "🔥" if s.get('confidence') == 'HIGH' else "⚡"
-
-            # Get winrate for this pair
             winrate = get_pair_winrate(s['pair'])
             winrate_text = f" | *WR:* {winrate:.1f}%" if winrate is not None else ""
 
@@ -45,7 +50,7 @@ def send_alerts(signals, chat_id=None):
             rr_text = f"📊 *RR:* {rr_ratio_tp1:.1f}:1 / {rr_ratio_tp2:.1f}:1"
             strategy_note = "\n💡 *Strategy:* Partial profit at TP1, SL to BE"
 
-            lines.append(
+            signal_text = (
                 f"\n{confidence_emoji} *{s['pair']}* | {s['timeframe']} | *{s['side']}*"
                 f"\n💰 *Entry:* {s['price']:.6f}"
                 f"\n🛑 *SL:* {s['stop_loss']:.6f} | {tp_text}"
@@ -55,8 +60,33 @@ def send_alerts(signals, chat_id=None):
                 f"\n⏰ {s['timestamp']:%H:%M UTC}"
                 f"\n🆔 `{s.get('signal_uuid', 'N/A')}`\n"
             )
-        text = "\n".join(lines)
 
+            signal_length = len(signal_text)
+
+            # Check if adding this signal would exceed the limit
+            if current_length + signal_length > MAX_MESSAGE_LENGTH and current_batch:
+                # Save current batch and start a new one
+                batches.append(current_batch)
+                current_batch = [signal_text]
+                current_length = len("🚨 *Signal Alert*\n") + signal_length
+            else:
+                # Add to current batch
+                current_batch.append(signal_text)
+                current_length += signal_length
+
+        # Add the last batch if it has signals
+        if current_batch:
+            batches.append(current_batch)
+
+        # Send each batch as a separate message
+        for i, batch in enumerate(batches):
+            header = f"🚨 *Signal Alert* ({i+1}/{len(batches)})" if len(batches) > 1 else "🚨 *Signal Alert*"
+            text = header + "\n" + "\n".join(batch)
+            _send_telegram_message(chat_id, text)
+
+
+def _send_telegram_message(chat_id, text):
+    """Helper function to send a single Telegram message"""
     payload = {
         "chat_id": chat_id,
         "text": text,

@@ -497,7 +497,7 @@ def save_signal(signal: Dict) -> None:
             s = Signal(**cleaned)
             session.add(s)
             session.commit()
-            logger.info(f"Saved signal: {s.id} | {s.signal_uuid} | {s.pair} {s.timeframe} {s.side}")
+            logger.debug(f"Saved signal: {s.id} | {s.signal_uuid} | {s.pair} {s.timeframe} {s.side}")
     except SQLAlchemyError as e:
         logger.error(f"DB error saving signal: {e}")
 

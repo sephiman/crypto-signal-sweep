@@ -565,19 +565,80 @@ Test your strategy on historical data with 1-minute precision TP/SL simulation.
 ### **Features**
 
 - ✅ **1m precision**: Accurate TP/SL simulation using 1-minute candles
-- ✅ **Dual TP logic**: TP1 → SL-to-BE → TP2/BE (exact replica of live trading)
+- ✅ **Dual TP logic**: TP1 → SL-to-BE → TP2/TP1 (exact replica of live trading)
 - ✅ **No look-ahead bias**: Uses pandas resample for proper timeframe aggregation
-- ✅ **Auto data collection**: Downloads 365 days of 1m data from Binance (22 pairs)
+- ✅ **Auto data collection**: Downloads historical 1m data from Binance
 - ✅ **Comprehensive metrics**: Win rate, PnL, Sharpe, max drawdown, profit factor
 - ✅ **Detailed breakdowns**: By pair, timeframe, score, regime, side
 
+### **Signal Outcomes**
+
+The backtest tracks three possible outcomes:
+
+1. **TP2** - Full profit target hit (best outcome)
+2. **TP1** - Partial profit taken, then closed at breakeven (good outcome)
+   - Signal hits TP1, SL moves to breakeven
+   - Price returns and hits BE level
+   - Profit = TP1 percentage (not 0%)
+3. **SL** - Stop loss hit (loss)
+
 ### **Architecture**
 
-- **Data Storage**: 1m OHLCV in `historical_ohlcv` table
-- **Aggregation**: Real-time 1m → 15m/1h/4h using pandas resample
-- **Signal Generation**: Uses your live `analyze_market()` logic
-- **Execution Simulation**: Checks every 1m bar for TP1/TP2/SL/BE hits
-- **Results**: Saved to `backtest_signals` table with full signal details + PnL
+#### **Data Flow**
+```
+1m OHLCV DB → Pre-compute 5m/15m/1h/4h → Cache in memory
+                ↓
+        Signal generation (your strategy)
+                ↓
+        1m precision hit checking
+                ↓
+        Results saved to backtest_signals table
+```
+
+### **Analyzing Results**
+
+After backtest completion, run the analyzer:
+
+```bash
+docker-compose run app python -m backtest.analyzer <run_id>
+```
+
+**Console Output Includes:**
+- Overall win rate, total PnL, average PnL per trade
+- Breakdown by pair: `BTC/USDT | Trades: 45 | TP2: 28 | TP1: 8 | SL: 9 | WR: 62.2%`
+- Breakdown by timeframe: Shows which timeframes perform best
+- Breakdown by score: Validates your scoring thresholds
+- Breakdown by regime: Compares trending vs ranging performance
+- Breakdown by side: LONG vs SHORT performance comparison
+- Best/worst performers
+
+**CSV Export:**
+- Saved to `backtest_results_{run_id}_{timestamp}.csv`
+- Full signal details for custom analysis in Excel/Python
+
+**Database Queries:**
+```sql
+-- View backtest runs
+SELECT * FROM backtest_runs ORDER BY created_at DESC;
+
+-- View signals for a specific run
+SELECT pair, side, hit, pnl_percent, timestamp
+FROM backtest_signals
+WHERE run_id = 1234567890
+ORDER BY timestamp;
+
+-- Win rate by pair
+SELECT
+  pair,
+  COUNT(*) FILTER (WHERE hit = 'TP2') as tp2_wins,
+  COUNT(*) FILTER (WHERE hit = 'TP1') as tp1_wins,
+  COUNT(*) FILTER (WHERE hit = 'SL') as losses,
+  ROUND(AVG(CASE WHEN hit IN ('TP2', 'TP1') THEN 1.0 ELSE 0.0 END) * 100, 2) as win_rate
+FROM backtest_signals
+WHERE run_id = 1234567890
+GROUP BY pair
+ORDER BY win_rate DESC;
+```
 
 ### **Usage Notes**
 
@@ -585,6 +646,9 @@ Test your strategy on historical data with 1-minute precision TP/SL simulation.
 - **Subsequent runs**: Set `COLLECT_HISTORICAL_DATA=false` (uses cached data)
 - **Data collection**: Handles rate limits, retries, and gaps automatically
 - **Tables**: Created automatically via SQLAlchemy on first run
+- **Memory usage**: ~500MB for 10 pairs × 365 days × 1m candles
+- **Processing speed**: ~1% per 43 seconds (525K candles/year)
+- **Outcome tracking**: TP2 (full win), TP1 (partial win at BE), SL (loss)
 
 ---
 
