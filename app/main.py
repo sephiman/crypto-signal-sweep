@@ -3,7 +3,10 @@ import logging
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.config import TIMEFRAMES, RUN_AT_START, MARKET_SUMMARY_ENABLED
+from app.config import (
+    TIMEFRAMES, RUN_AT_START, MARKET_SUMMARY_ENABLED,
+    BACKTEST_MODE, COLLECT_HISTORICAL_DATA, PAIRS
+)
 from app.config import tf_to_minutes
 from app.jobs import run_analysis_job, run_midnight_summary_job, run_hit_polling_job, run_market_summary_job
 from app.exception_notifier import setup_exception_notification
@@ -64,4 +67,30 @@ if MARKET_SUMMARY_ENABLED:
     )
 
 if __name__ == "__main__":
-    scheduler.start()
+    if BACKTEST_MODE:
+        # BACKTEST MODE
+        logging.info("Starting in BACKTEST mode")
+
+        # Collect historical data if requested
+        if COLLECT_HISTORICAL_DATA:
+            logging.info("Collecting historical data...")
+            from backtest.data_collector import collect_historical_data
+            collect_historical_data(PAIRS, days=365)
+            logging.info("Historical data collection completed")
+
+        # Run backtest
+        logging.info("Running backtest...")
+        from backtest.engine import run_backtest
+        run_backtest()
+
+        # Analyze results
+        logging.info("Analyzing backtest results...")
+        from backtest.analyzer import analyze_backtest
+        analyze_backtest()
+
+        logging.info("Backtest mode completed, exiting")
+
+    else:
+        # LIVE MODE
+        logging.info("Starting in LIVE mode")
+        scheduler.start()

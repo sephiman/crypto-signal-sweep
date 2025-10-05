@@ -25,9 +25,9 @@ from app.config import (
 )
 
 logger = logging.getLogger(__name__)
-exchange = ccxt.binance()
 
 from app.db.tracker import save_market_analysis
+from app.data_provider import get_current_price, fetch_ohlcv_df
 
 
 class TechnicalIndicators:
@@ -77,7 +77,7 @@ def analyze_market(pairs, timeframe):
     """
     Market analysis with improved filtering and scoring
     """
-    df = _fetch_ohlcv_df(pairs, timeframe)
+    df = fetch_ohlcv_df(pairs, timeframe)
     signals = []
 
     for pair in pairs:
@@ -87,7 +87,7 @@ def analyze_market(pairs, timeframe):
                 logger.info(f"⏭️ SKIP | {timeframe} | {pair} | Reason:INSUFFICIENT_DATA (<50 candles)")
                 continue
 
-            price = _get_last_price(pair)
+            price = get_current_price(pair)
 
             # Calculate ALL indicators first (always)
             indicators = _calculate_technical_indicators(data, price)
@@ -121,26 +121,6 @@ def analyze_market(pairs, timeframe):
     return signals
 
 
-def _get_last_price(pair):
-    ticker = exchange.fetch_ticker(pair)
-    return float(ticker["last"])
-
-
-def _fetch_ohlcv_df(pairs, timeframe):
-    """
-    Fetches OHLCV for each pair, drops the _incomplete_ bar,
-    and returns a dict of DataFrames of only closed candles.
-    """
-    result = {}
-    for pair in pairs:
-        candles = exchange.fetch_ohlcv(pair, timeframe)
-        df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-        # drop the in-flight (incomplete) candle
-        if len(df) > 1:
-            df = df.iloc[:-1]
-        result[pair] = df
-    return result
 
 
 
@@ -215,7 +195,7 @@ def _get_volume_ratio(data):
 def _get_htf_confirmation(pair, higher_tf):
     """Higher timeframe confirmation"""
     try:
-        hdf = _fetch_ohlcv_df([pair], higher_tf)[pair]
+        hdf = fetch_ohlcv_df([pair], higher_tf)[pair]
         if len(hdf) < 30:
             return True, True
 

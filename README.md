@@ -536,6 +536,58 @@ REQUIRED_MA_BARS=2
 
 ---
 
+## 🔬 **Backtesting System**
+
+Test your strategy on historical data with 1-minute precision TP/SL simulation.
+
+### **Quick Start**
+
+1. **Configure backtest mode** in `docker-compose.yml`:
+   ```yaml
+   environment:
+     - BACKTEST_MODE=true
+     - BACKTEST_START_DATE=2024-01-01
+     - BACKTEST_END_DATE=2024-12-31
+     - COLLECT_HISTORICAL_DATA=true  # false after first run
+     - TIMEFRAMES=15m,1h,4h
+   ```
+
+2. **Run backtest**:
+   ```bash
+   docker-compose up
+   ```
+
+3. **Review results**:
+   - Console: Win rate, total PnL, Sharpe ratio, breakdowns by pair/timeframe/score
+   - CSV: `backtest_results_{run_id}_{timestamp}.csv`
+   - Database: `backtest_signals` and `backtest_runs` tables
+
+### **Features**
+
+- ✅ **1m precision**: Accurate TP/SL simulation using 1-minute candles
+- ✅ **Dual TP logic**: TP1 → SL-to-BE → TP2/BE (exact replica of live trading)
+- ✅ **No look-ahead bias**: Uses pandas resample for proper timeframe aggregation
+- ✅ **Auto data collection**: Downloads 365 days of 1m data from Binance (22 pairs)
+- ✅ **Comprehensive metrics**: Win rate, PnL, Sharpe, max drawdown, profit factor
+- ✅ **Detailed breakdowns**: By pair, timeframe, score, regime, side
+
+### **Architecture**
+
+- **Data Storage**: 1m OHLCV in `historical_ohlcv` table
+- **Aggregation**: Real-time 1m → 15m/1h/4h using pandas resample
+- **Signal Generation**: Uses your live `analyze_market()` logic
+- **Execution Simulation**: Checks every 1m bar for TP1/TP2/SL/BE hits
+- **Results**: Saved to `backtest_signals` table with full signal details + PnL
+
+### **Usage Notes**
+
+- **First run**: Set `COLLECT_HISTORICAL_DATA=true` (takes 1-2 hours for 22 pairs)
+- **Subsequent runs**: Set `COLLECT_HISTORICAL_DATA=false` (uses cached data)
+- **Data collection**: Handles rate limits, retries, and gaps automatically
+- **Tables**: Created automatically via SQLAlchemy on first run
+
+---
+
 ## 📜 **License**
 
 GPL-3.0 - Open source with copyleft requirements
