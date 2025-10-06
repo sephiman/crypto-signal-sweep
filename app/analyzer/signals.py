@@ -2,8 +2,6 @@ import datetime
 import logging
 import uuid
 
-import ccxt
-import pandas as pd
 from ta.momentum import RSIIndicator, StochasticOscillator
 from ta.trend import MACD
 from ta.volatility import AverageTrueRange, BollingerBands
@@ -25,14 +23,16 @@ from app.config import (
 )
 
 logger = logging.getLogger(__name__)
-exchange = ccxt.binance()
 
 from app.db.tracker import save_market_analysis
+from app.data_provider import get_current_price, fetch_ohlcv_df
 
 
 class TechnicalIndicators:
     """Container for all calculated technical indicators"""
-    def __init__(self, rsi, macd, signal_line, diff, ema_fast, ema_slow, atr, atr_pct, adx, stoch_k, stoch_d, volume_ratio, bb_width, bb_width_prev):
+
+    def __init__(self, rsi, macd, signal_line, diff, ema_fast, ema_slow, atr, atr_pct, adx, stoch_k, stoch_d,
+                 volume_ratio, bb_width, bb_width_prev):
         self.rsi = rsi
         self.macd = macd
         self.signal_line = signal_line
@@ -51,6 +51,7 @@ class TechnicalIndicators:
 
 class MarketConditions:
     """Container for all market condition checks"""
+
     def __init__(self, rsi_ok_long, rsi_ok_short, momentum_ok_long, momentum_ok_short,
                  ema_ok_long, ema_ok_short, trend_ok_long, trend_ok_short,
                  stoch_ok_long, stoch_ok_short, confirm_long, confirm_short,
@@ -77,17 +78,22 @@ def analyze_market(pairs, timeframe):
     """
     Market analysis with improved filtering and scoring
     """
-    df = _fetch_ohlcv_df(pairs, timeframe)
+    df = fetch_ohlcv_df(pairs, timeframe)
     signals = []
 
     for pair in pairs:
         try:
-            data = df[pair]
-            if len(data) < 50:  # Need sufficient data
-                logger.info(f"⏭️ SKIP | {timeframe} | {pair} | Reason:INSUFFICIENT_DATA (<50 candles)")
+            # Skip if pair not in result dict (no data available yet)
+            if pair not in df:
+                logger.debug(f"⏭️ SKIP | {timeframe} | {pair} | Reason:NO_DATA (warmup period)")
                 continue
 
-            price = _get_last_price(pair)
+            data = df[pair]
+            if len(data) < 50:  # Need sufficient data
+                logger.debug(f"⏭️ SKIP | {timeframe} | {pair} | Reason:INSUFFICIENT_DATA (<50 candles)")
+                continue
+
+            price = get_current_price(pair)
 
             # Calculate ALL indicators first (always)
             indicators = _calculate_technical_indicators(data, price)
@@ -99,11 +105,15 @@ def analyze_market(pairs, timeframe):
             long_score, short_score, min_score = _calculate_scores(indicators, conditions, timeframe)
 
             # Determine signal side and status
-            side, status, result = _determine_signal_side(long_score, short_score, min_score, conditions, indicators, timeframe)
+            side, status, result = _determine_signal_side(long_score, short_score, min_score, conditions, indicators,
+                                                          timeframe)
+
+            # Get candle close time (last timestamp in data)
+            candle_close_time = data['timestamp'].iloc[-1]
 
             # Log analysis and save to database
             _log_and_save_analysis(pair, timeframe, price, status, result, long_score, short_score,
-                                 min_score, indicators, conditions, side)
+                                   min_score, indicators, conditions, side, candle_close_time)
 
             # Skip if filters don't pass or signal generation not allowed
             if not conditions.atr_pass or not conditions.volume_pass or side == "NONE" or status != "✅ SIGNAL":
@@ -111,7 +121,7 @@ def analyze_market(pairs, timeframe):
 
             # Generate and add signal
             signal = _generate_signal_details(pair, timeframe, side, price, indicators, conditions,
-                                            long_score, short_score, min_score)
+                                              long_score, short_score, min_score)
             signals.append(signal)
 
         except Exception as e:
@@ -119,29 +129,6 @@ def analyze_market(pairs, timeframe):
             continue
 
     return signals
-
-
-def _get_last_price(pair):
-    ticker = exchange.fetch_ticker(pair)
-    return float(ticker["last"])
-
-
-def _fetch_ohlcv_df(pairs, timeframe):
-    """
-    Fetches OHLCV for each pair, drops the _incomplete_ bar,
-    and returns a dict of DataFrames of only closed candles.
-    """
-    result = {}
-    for pair in pairs:
-        candles = exchange.fetch_ohlcv(pair, timeframe)
-        df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-        # drop the in-flight (incomplete) candle
-        if len(df) > 1:
-            df = df.iloc[:-1]
-        result[pair] = df
-    return result
-
 
 
 def _is_valid_trading_time():
@@ -212,11 +199,62 @@ def _get_volume_ratio(data):
     return current_volume / avg_volume
 
 
-def _get_htf_confirmation(pair, higher_tf):
-    """Higher timeframe confirmation"""
+def _get_htf_confirmation(pair, higher_tf, htf_indicators_cache=None):
+    """
+    Higher timeframe confirmation.
+
+    Args:
+        pair: Trading pair
+        higher_tf: Higher timeframe to check
+        htf_indicators_cache: Optional pre-calculated indicators dict from backtest mode
+
+    Returns:
+        Tuple of (confirm_long, confirm_short)
+    """
+    from app.config import BACKTEST_MODE
+    from app.data_provider import _backtest_current_timestamp
+
     try:
-        hdf = _fetch_ohlcv_df([pair], higher_tf)[pair]
-        if len(hdf) < 30:
+        # In backtest mode with pre-calculated indicators, use them directly
+        if BACKTEST_MODE and htf_indicators_cache:
+            current_ts = _backtest_current_timestamp
+            if current_ts is None:
+                return True, True
+
+            # Get indicators for the higher timeframe at the current timestamp
+            indicators_key = f'{higher_tf}_indicators'
+            if indicators_key in htf_indicators_cache:
+                indicators = htf_indicators_cache[indicators_key]
+
+                # Find the most recent HTF candle at or before current timestamp
+                # We need to look back because HTF candles close less frequently
+                htf_candles = htf_indicators_cache.get(higher_tf)
+                if htf_candles is not None and len(htf_candles) > 0:
+                    # Filter to candles at or before current time
+                    valid_candles = htf_candles[htf_candles['timestamp'] <= current_ts]
+                    if len(valid_candles) == 0:
+                        return True, True
+
+                    # Get the most recent HTF timestamp
+                    htf_ts = valid_candles['timestamp'].iloc[-1]
+
+                    # Lookup pre-calculated indicators at that timestamp
+                    ht_rsi = indicators['rsi'].get(htf_ts)
+                    ht_macd = indicators['macd'].get(htf_ts)
+                    ht_signal = indicators['macd_signal'].get(htf_ts)
+
+                    if ht_rsi is None or ht_macd is None or ht_signal is None:
+                        return True, True
+
+                    # HTF confirmation logic
+                    confirm_long = ht_rsi > 45 and ht_macd > ht_signal and (ht_macd - ht_signal) > 0.5
+                    confirm_short = ht_rsi < 55 and ht_macd < ht_signal and (ht_signal - ht_macd) > 0.5
+
+                    return confirm_long, confirm_short
+
+        # Fall back to live calculation (for live mode or if cache not available)
+        hdf = fetch_ohlcv_df([pair], higher_tf).get(pair)
+        if hdf is None or len(hdf) < 30:
             return True, True
 
         ht_rsi = RSIIndicator(hdf['close'], window=RSI_PERIOD).rsi().iloc[-1]
@@ -234,10 +272,9 @@ def _get_htf_confirmation(pair, higher_tf):
         confirm_short = ht_rsi < 55 and ht_macd < ht_signal and (ht_signal - ht_macd) > 0.5
 
         return confirm_long, confirm_short
-    except Exception:
+    except Exception as e:
+        logger.debug(f"HTF confirmation failed for {pair} {higher_tf}: {e}")
         return True, True  # Default to allowing signals if HTF fails
-
-
 
 
 def _calculate_sl_tp(price, atr, side, pair):
@@ -321,7 +358,7 @@ def _calculate_technical_indicators(data, price):
         bb_width = bb_width_prev = 0.0  # Neutral values when disabled
 
     return TechnicalIndicators(rsi, macd, signal_line, diff, ema_fast, ema_slow,
-                             atr, atr_pct, adx, stoch_k, stoch_d, volume_ratio, bb_width, bb_width_prev)
+                               atr, atr_pct, adx, stoch_k, stoch_d, volume_ratio, bb_width, bb_width_prev)
 
 
 def _calculate_market_conditions(data, indicators, timeframe, pair):
@@ -393,7 +430,15 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
     if USE_HIGHER_TF_CONFIRM:
         higher_tf = HIGHER_TF_MAP.get(timeframe)
         if higher_tf:
-            confirm_long, confirm_short = _get_htf_confirmation(pair, higher_tf)
+            # Get HTF indicators cache for backtest mode
+            from app.config import BACKTEST_MODE
+            from app.data_provider import _backtest_data_cache
+
+            htf_cache = None
+            if BACKTEST_MODE and pair in _backtest_data_cache:
+                htf_cache = _backtest_data_cache[pair]
+
+            confirm_long, confirm_short = _get_htf_confirmation(pair, higher_tf, htf_cache)
         else:
             confirm_long = confirm_short = True
     else:
@@ -409,9 +454,9 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
         bb_pass = True  # Allow signals when disabled
 
     return MarketConditions(rsi_ok_long, rsi_ok_short, momentum_ok_long, momentum_ok_short,
-                          ema_ok_long, ema_ok_short, trend_ok_long, trend_ok_short,
-                          stoch_ok_long, stoch_ok_short, confirm_long, confirm_short,
-                          volume_pass, atr_pass, is_trending, bb_pass)
+                            ema_ok_long, ema_ok_short, trend_ok_long, trend_ok_short,
+                            stoch_ok_long, stoch_ok_short, confirm_long, confirm_short,
+                            volume_pass, atr_pass, is_trending, bb_pass)
 
 
 def _calculate_scores(indicators, conditions, timeframe):
@@ -461,7 +506,8 @@ def _determine_signal_side(long_score, short_score, min_score, conditions, indic
         if not conditions.momentum_ok_long: long_fails.append(f"MACD_MOM({indicators.diff:.6f})")
         if not conditions.ema_ok_long: long_fails.append("EMA")
         if not conditions.trend_ok_long: long_fails.append("TREND")
-        if STOCH_ENABLED and not conditions.stoch_ok_long: long_fails.append(f"STOCH({indicators.stoch_k:.1f}/{indicators.stoch_d:.1f})")
+        if STOCH_ENABLED and not conditions.stoch_ok_long: long_fails.append(
+            f"STOCH({indicators.stoch_k:.1f}/{indicators.stoch_d:.1f})")
         if USE_HIGHER_TF_CONFIRM and not conditions.confirm_long: long_fails.append("HTF")
 
         if not conditions.rsi_ok_short: short_fails.append(f"RSI({indicators.rsi:.1f})")
@@ -469,7 +515,8 @@ def _determine_signal_side(long_score, short_score, min_score, conditions, indic
         if not conditions.momentum_ok_short: short_fails.append(f"MACD_MOM({indicators.diff:.6f})")
         if not conditions.ema_ok_short: short_fails.append("EMA")
         if not conditions.trend_ok_short: short_fails.append("TREND")
-        if STOCH_ENABLED and not conditions.stoch_ok_short: short_fails.append(f"STOCH({indicators.stoch_k:.1f}/{indicators.stoch_d:.1f})")
+        if STOCH_ENABLED and not conditions.stoch_ok_short: short_fails.append(
+            f"STOCH({indicators.stoch_k:.1f}/{indicators.stoch_d:.1f})")
         if USE_HIGHER_TF_CONFIRM and not conditions.confirm_short: short_fails.append("HTF")
 
         if long_score >= short_score:
@@ -507,15 +554,18 @@ def _determine_signal_side(long_score, short_score, min_score, conditions, indic
 
 
 def _log_and_save_analysis(pair, timeframe, price, status, result, long_score, short_score,
-                         min_score, indicators, conditions, side):
+                           min_score, indicators, conditions, side, candle_close_time):
     """Log analysis results and save to database"""
     # All metrics
     stoch_info = f"STOCH:{indicators.stoch_k:.1f}/{indicators.stoch_d:.1f} " if STOCH_ENABLED else ""
     stoch_gates = f"Stoch:{int(conditions.stoch_ok_long)}/{int(conditions.stoch_ok_short)} " if STOCH_ENABLED else ""
     adx_threshold = get_adx_threshold_for_timeframe(timeframe)
 
+    # Format candle close time
+    close_time_str = candle_close_time.strftime('%Y-%m-%d %H:%M:%S')
+
     logger.info(
-        f"{status} | {timeframe} | {pair} | "
+        f"{status} | {timeframe} | {pair} | Close:{close_time_str} | "
         f"Price:{price:.2f} RSI:{indicators.rsi:.1f} ADX:{indicators.adx:.1f} MACD:{indicators.diff:.4f} "
         f"EMA:{indicators.ema_fast:.2f}/{indicators.ema_slow:.2f} {stoch_info}ATR:{indicators.atr_pct:.3%} VOL:{indicators.volume_ratio:.1f}x | "
         f"Regime:{'TREND' if indicators.adx >= adx_threshold else 'RANGE'} "
@@ -581,7 +631,7 @@ def _log_and_save_analysis(pair, timeframe, price, status, result, long_score, s
 
 
 def _generate_signal_details(pair, timeframe, side, price, indicators, conditions,
-                           long_score, short_score, min_score):
+                             long_score, short_score, min_score):
     """Generate signal details with dual TP"""
     sl, tp1, tp2 = _calculate_sl_tp(price, indicators.atr, side, pair)
 
@@ -620,7 +670,8 @@ def _generate_signal_details(pair, timeframe, side, price, indicators, condition
         "required_score": min_score,
         "rsi_ok": conditions.rsi_ok_long if side == "LONG" else conditions.rsi_ok_short,
         "ema_ok": conditions.ema_ok_long if side == "LONG" else conditions.ema_ok_short,
-        "macd_ok": (indicators.macd > indicators.signal_line) if side == "LONG" else (indicators.macd < indicators.signal_line),
+        "macd_ok": (indicators.macd > indicators.signal_line) if side == "LONG" else (
+                    indicators.macd < indicators.signal_line),
         "macd_momentum_ok": conditions.momentum_ok_long if side == "LONG" else conditions.momentum_ok_short,
         "stoch_ok": conditions.stoch_ok_long if side == "LONG" else conditions.stoch_ok_short,
         "rsi": indicators.rsi,

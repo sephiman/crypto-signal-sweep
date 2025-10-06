@@ -497,14 +497,16 @@ def save_signal(signal: Dict) -> None:
             s = Signal(**cleaned)
             session.add(s)
             session.commit()
-            logger.info(f"Saved signal: {s.id} | {s.signal_uuid} | {s.pair} {s.timeframe} {s.side}")
+            logger.debug(f"Saved signal: {s.id} | {s.signal_uuid} | {s.pair} {s.timeframe} {s.side}")
     except SQLAlchemyError as e:
         logger.error(f"DB error saving signal: {e}")
 
 
 def save_market_analysis(analysis_data: Dict) -> None:
-    """Insert a new MarketAnalysis row, skipping if DB disabled."""
-    if not DB_ENABLED:
+    """Insert a new MarketAnalysis row, skipping if DB disabled or flag is off."""
+    from app.config import SAVE_MARKET_ANALYSIS
+
+    if not DB_ENABLED or not SAVE_MARKET_ANALYSIS:
         return
 
     # Clean up any numpy types in the payload

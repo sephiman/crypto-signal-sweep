@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, Index
 from sqlalchemy.ext.declarative import declarative_base
 import uuid
 
@@ -58,7 +58,7 @@ class MarketAnalysis(Base):
     timeframe = Column(String, nullable=False)
     timestamp = Column(DateTime, nullable=False)
     price = Column(Float, nullable=False)
-    
+
     # Technical indicators
     rsi = Column(Float, nullable=False)
     adx = Column(Float, nullable=False)
@@ -91,21 +91,111 @@ class MarketAnalysis(Base):
     stoch_ok_short = Column(Boolean, nullable=False)
     htf_confirm_long = Column(Boolean, nullable=False)
     htf_confirm_short = Column(Boolean, nullable=False)
-    
+
     # Filter conditions
     volume_pass = Column(Boolean, nullable=False)
     atr_pass = Column(Boolean, nullable=False)
     time_pass = Column(Boolean, nullable=False)
     bb_pass = Column(Boolean, nullable=True)
-    
+
     # Scores and regime
     long_score = Column(Integer, nullable=False)
     short_score = Column(Integer, nullable=False)
     min_score_required = Column(Integer, nullable=False)
     regime = Column(String, nullable=False)  # 'TREND' or 'RANGE'
     is_trending = Column(Boolean, nullable=False)
-    
+
     # Final result
     signal_generated = Column(Boolean, nullable=False, default=False)
     signal_side = Column(String, nullable=True)  # 'LONG', 'SHORT', or None
     skip_reason = Column(String, nullable=True)  # 'LOW_VOL', 'LOW_ATR', 'NO_SIGNAL', etc.
+
+
+class HistoricalOHLCV(Base):
+    __tablename__ = 'historical_ohlcv'
+    id = Column(Integer, primary_key=True, index=True)
+    pair = Column(String, nullable=False, index=True)
+    timeframe = Column(String, nullable=False, index=True)  # Always "1m"
+    timestamp = Column(DateTime, nullable=False, index=True)
+    open = Column(Float, nullable=False)
+    high = Column(Float, nullable=False)
+    low = Column(Float, nullable=False)
+    close = Column(Float, nullable=False)
+    volume = Column(Float, nullable=False)
+
+    __table_args__ = (
+        Index('idx_pair_timestamp', 'pair', 'timestamp', unique=True),
+    )
+
+
+class BacktestSignal(Base):
+    __tablename__ = 'backtest_signals'
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(Integer, nullable=False, index=True)
+    signal_uuid = Column(String, nullable=False, default=lambda: str(uuid.uuid4()))
+    pair = Column(String, nullable=False)
+    timeframe = Column(String, nullable=False)
+    side = Column(String, nullable=False)
+    price = Column(Float, nullable=False)
+    stop_loss = Column(Float, nullable=False)
+    take_profit_1 = Column(Float, nullable=False)
+    take_profit_2 = Column(Float, nullable=False)
+    timestamp = Column(DateTime, nullable=False)
+    hit = Column(String, default='PENDING', nullable=False)
+    hit_timestamp = Column(DateTime, nullable=True)
+    hit_price = Column(Float, nullable=True)
+    sl_moved_to_be = Column(Boolean, default=False, nullable=False)
+    pnl_percent = Column(Float, nullable=True)
+    momentum_ok = Column(Boolean, nullable=False)
+    trend_confirmed = Column(Boolean, nullable=False)
+    higher_tf_confirmed = Column(Boolean, nullable=False)
+    confirmed = Column(Boolean, nullable=False, default=False)
+    score = Column(Integer, nullable=False, default=0)
+    required_score = Column(Integer, nullable=False, default=0)
+    rsi_ok = Column(Boolean, nullable=False, default=False)
+    ema_ok = Column(Boolean, nullable=False, default=False)
+    macd_ok = Column(Boolean, nullable=False, default=False)
+    macd_momentum_ok = Column(Boolean, nullable=False, default=False)
+    stoch_ok = Column(Boolean, nullable=False, default=False)
+    rsi = Column(Float, nullable=True)
+    adx = Column(Float, nullable=True)
+    macd = Column(Float, nullable=True)
+    macd_signal = Column(Float, nullable=True)
+    macd_diff = Column(Float, nullable=True)
+    ema_fast = Column(Float, nullable=True)
+    ema_slow = Column(Float, nullable=True)
+    ema_diff = Column(Float, nullable=True)
+    stoch_k = Column(Float, nullable=True)
+    stoch_d = Column(Float, nullable=True)
+    atr = Column(Float, nullable=True)
+    atr_pct = Column(Float, nullable=True)
+    bb_width = Column(Float, nullable=True)
+    bb_width_prev = Column(Float, nullable=True)
+    regime = Column(String, nullable=True)
+    htf_used = Column(Boolean, nullable=False, default=False)
+    volume_ratio = Column(Float, nullable=True, default=1.0)
+    confidence = Column(String, nullable=True, default='MEDIUM')
+
+
+class BacktestRun(Base):
+    __tablename__ = 'backtest_runs'
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(Integer, nullable=False, unique=True, index=True)
+    start_date = Column(DateTime, nullable=False)
+    end_date = Column(DateTime, nullable=False)
+    pairs = Column(Text, nullable=False)  # JSON array as text
+    timeframes = Column(Text, nullable=False)  # JSON array as text
+    config_snapshot = Column(Text, nullable=False)  # JSON config as text
+    status = Column(String, nullable=False, default='running')  # 'running', 'completed', 'failed'
+    total_trades = Column(Integer, nullable=True)
+    total_winners = Column(Integer, nullable=True)
+    total_losers = Column(Integer, nullable=True)
+    total_breakeven = Column(Integer, nullable=True)
+    win_rate = Column(Float, nullable=True)
+    total_pnl = Column(Float, nullable=True)
+    avg_pnl_per_trade = Column(Float, nullable=True)
+    max_drawdown = Column(Float, nullable=True)
+    sharpe_ratio = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    error_message = Column(Text, nullable=True)
