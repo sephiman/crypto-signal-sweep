@@ -135,9 +135,13 @@ class BacktestEngine:
 
     def _load_historical_data(self, db: Session) -> Dict[str, Dict]:
         """
-        Load all historical data and pre-compute timeframes.
-        Returns: {pair: {'1m_indexed': {ts: candle}, '1m': df, '15m': df, '1h': df, '4h': df}}
+        Load all historical data and pre-compute timeframes with HTF indicators.
+        Returns: {pair: {'1m_indexed': {ts: candle}, '1m': df, '15m': df, '15m_indicators': {...}, ...}}
         """
+        from ta.momentum import RSIIndicator
+        from ta.trend import MACD
+        from app.config import RSI_PERIOD, MACD_FAST, MACD_SLOW, MACD_SIGNAL, HIGHER_TF_MAP, USE_HIGHER_TF_CONFIRM
+
         data_cache = {}
 
         for pair in self.pairs:
@@ -177,6 +181,14 @@ class BacktestEngine:
 
             timeframes_data = {'1m': df_1m, '1m_indexed': df_1m_dict}
 
+            # Collect all higher timeframes that need indicator pre-calculation
+            htf_to_precompute = set()
+            if USE_HIGHER_TF_CONFIRM:
+                for tf in self.timeframes:
+                    higher_tf = HIGHER_TF_MAP.get(tf)
+                    if higher_tf:
+                        htf_to_precompute.add(higher_tf)
+
             for tf in self.timeframes:
                 if tf == '1m':
                     continue  # Already have 1m
@@ -200,6 +212,29 @@ class BacktestEngine:
                     df_resampled = df_resampled.reset_index()
                     timeframes_data[tf] = df_resampled
                     logger.info(f"{pair}: Pre-computed {len(df_resampled)} {tf} candles")
+
+                    # Pre-calculate indicators for higher timeframes used in confirmation
+                    if tf in htf_to_precompute and len(df_resampled) >= 30:
+                        try:
+                            rsi_obj = RSIIndicator(df_resampled['close'], window=RSI_PERIOD)
+                            macd_obj = MACD(
+                                close=df_resampled['close'],
+                                window_slow=MACD_SLOW,
+                                window_fast=MACD_FAST,
+                                window_sign=MACD_SIGNAL
+                            )
+
+                            # Create timestamp-indexed dictionaries for O(1) lookup
+                            indicators_dict = {
+                                'rsi': dict(zip(df_resampled['timestamp'], rsi_obj.rsi())),
+                                'macd': dict(zip(df_resampled['timestamp'], macd_obj.macd())),
+                                'macd_signal': dict(zip(df_resampled['timestamp'], macd_obj.macd_signal()))
+                            }
+
+                            timeframes_data[f'{tf}_indicators'] = indicators_dict
+                            logger.info(f"{pair}: Pre-computed {tf} indicators (RSI, MACD) for HTF confirmation")
+                        except Exception as e:
+                            logger.warning(f"{pair}: Failed to pre-compute {tf} indicators: {e}")
 
             data_cache[pair] = timeframes_data
 

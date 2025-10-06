@@ -199,11 +199,62 @@ def _get_volume_ratio(data):
     return current_volume / avg_volume
 
 
-def _get_htf_confirmation(pair, higher_tf):
-    """Higher timeframe confirmation"""
+def _get_htf_confirmation(pair, higher_tf, htf_indicators_cache=None):
+    """
+    Higher timeframe confirmation.
+
+    Args:
+        pair: Trading pair
+        higher_tf: Higher timeframe to check
+        htf_indicators_cache: Optional pre-calculated indicators dict from backtest mode
+
+    Returns:
+        Tuple of (confirm_long, confirm_short)
+    """
+    from app.config import BACKTEST_MODE
+    from app.data_provider import _backtest_current_timestamp
+
     try:
-        hdf = fetch_ohlcv_df([pair], higher_tf)[pair]
-        if len(hdf) < 30:
+        # In backtest mode with pre-calculated indicators, use them directly
+        if BACKTEST_MODE and htf_indicators_cache:
+            current_ts = _backtest_current_timestamp
+            if current_ts is None:
+                return True, True
+
+            # Get indicators for the higher timeframe at the current timestamp
+            indicators_key = f'{higher_tf}_indicators'
+            if indicators_key in htf_indicators_cache:
+                indicators = htf_indicators_cache[indicators_key]
+
+                # Find the most recent HTF candle at or before current timestamp
+                # We need to look back because HTF candles close less frequently
+                htf_candles = htf_indicators_cache.get(higher_tf)
+                if htf_candles is not None and len(htf_candles) > 0:
+                    # Filter to candles at or before current time
+                    valid_candles = htf_candles[htf_candles['timestamp'] <= current_ts]
+                    if len(valid_candles) == 0:
+                        return True, True
+
+                    # Get the most recent HTF timestamp
+                    htf_ts = valid_candles['timestamp'].iloc[-1]
+
+                    # Lookup pre-calculated indicators at that timestamp
+                    ht_rsi = indicators['rsi'].get(htf_ts)
+                    ht_macd = indicators['macd'].get(htf_ts)
+                    ht_signal = indicators['macd_signal'].get(htf_ts)
+
+                    if ht_rsi is None or ht_macd is None or ht_signal is None:
+                        return True, True
+
+                    # HTF confirmation logic
+                    confirm_long = ht_rsi > 45 and ht_macd > ht_signal and (ht_macd - ht_signal) > 0.5
+                    confirm_short = ht_rsi < 55 and ht_macd < ht_signal and (ht_signal - ht_macd) > 0.5
+
+                    return confirm_long, confirm_short
+
+        # Fall back to live calculation (for live mode or if cache not available)
+        hdf = fetch_ohlcv_df([pair], higher_tf).get(pair)
+        if hdf is None or len(hdf) < 30:
             return True, True
 
         ht_rsi = RSIIndicator(hdf['close'], window=RSI_PERIOD).rsi().iloc[-1]
@@ -221,7 +272,8 @@ def _get_htf_confirmation(pair, higher_tf):
         confirm_short = ht_rsi < 55 and ht_macd < ht_signal and (ht_signal - ht_macd) > 0.5
 
         return confirm_long, confirm_short
-    except Exception:
+    except Exception as e:
+        logger.debug(f"HTF confirmation failed for {pair} {higher_tf}: {e}")
         return True, True  # Default to allowing signals if HTF fails
 
 
@@ -378,7 +430,15 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
     if USE_HIGHER_TF_CONFIRM:
         higher_tf = HIGHER_TF_MAP.get(timeframe)
         if higher_tf:
-            confirm_long, confirm_short = _get_htf_confirmation(pair, higher_tf)
+            # Get HTF indicators cache for backtest mode
+            from app.config import BACKTEST_MODE
+            from app.data_provider import _backtest_data_cache
+
+            htf_cache = None
+            if BACKTEST_MODE and pair in _backtest_data_cache:
+                htf_cache = _backtest_data_cache[pair]
+
+            confirm_long, confirm_short = _get_htf_confirmation(pair, higher_tf, htf_cache)
         else:
             confirm_long = confirm_short = True
     else:
