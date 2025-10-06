@@ -76,42 +76,66 @@ class MarketConditions:
 
 def analyze_market(pairs, timeframe):
     """
-    Market analysis with improved filtering and scoring
+    Market analysis - shared logic with mode-specific data retrieval.
+
+    This design ensures:
+    1. Single source of truth for analysis logic
+    2. Performance optimization for backtest mode
+    3. Any changes to scoring/filtering automatically apply to both modes
     """
+    from app.config import BACKTEST_MODE
+    from app.data_provider import _backtest_data_cache
+
     df = fetch_ohlcv_df(pairs, timeframe)
     signals = []
 
+    # Pre-check for backtest mode to avoid repeated conditionals
+    use_backtest_cache = BACKTEST_MODE and _backtest_data_cache
+
     for pair in pairs:
         try:
-            # Skip if pair not in result dict (no data available yet)
+            # Skip if pair not in result dict
             if pair not in df:
-                logger.debug(f"⏭️ SKIP | {timeframe} | {pair} | Reason:NO_DATA (warmup period)")
+                if not use_backtest_cache:  # Only log in live mode
+                    logger.debug(f"⏭️ SKIP | {timeframe} | {pair} | Reason:NO_DATA (warmup period)")
                 continue
 
             data = df[pair]
-            if len(data) < 50:  # Need sufficient data
-                logger.debug(f"⏭️ SKIP | {timeframe} | {pair} | Reason:INSUFFICIENT_DATA (<50 candles)")
+            if len(data) < 50:
+                if not use_backtest_cache:  # Only log in live mode
+                    logger.debug(f"⏭️ SKIP | {timeframe} | {pair} | Reason:INSUFFICIENT_DATA (<50 candles)")
                 continue
 
             price = get_current_price(pair)
 
-            # Calculate ALL indicators first (always)
-            indicators = _calculate_technical_indicators(data, price)
+            # MODE-SPECIFIC: Get indicators (cache vs calculation)
+            if use_backtest_cache and pair in _backtest_data_cache:
+                # BACKTEST: Pure cache lookups (imported from backtest_cache module)
+                from app.analyzer.backtest_cache import get_indicators_from_cache, get_conditions_from_cache
 
-            # Calculate filter conditions and market conditions
-            conditions = _calculate_market_conditions(data, indicators, timeframe, pair)
+                pair_cache = _backtest_data_cache[pair]
+                indicators_key = f'{timeframe}_indicators'
+                indicators_cache = pair_cache.get(indicators_key, {})
+                sma_cache = indicators_cache.get('sma', {})
 
-            # Scoring system
+                candle_ts = data['timestamp'].iloc[-1]
+                prev_candle_ts = data['timestamp'].iloc[-2] if len(data) >= 2 else None
+
+                indicators = get_indicators_from_cache(candle_ts, prev_candle_ts, indicators_cache, price)
+                conditions = get_conditions_from_cache(data, indicators, timeframe, sma_cache, pair_cache)
+            else:
+                # LIVE: Calculate from data
+                indicators = _calculate_technical_indicators(data, price)
+                conditions = _calculate_market_conditions(data, indicators, timeframe, pair)
+
+            # SHARED: Analysis logic (same for both modes)
             long_score, short_score, min_score = _calculate_scores(indicators, conditions, timeframe)
 
-            # Determine signal side and status
             side, status, result = _determine_signal_side(long_score, short_score, min_score, conditions, indicators,
                                                           timeframe)
 
-            # Get candle close time (last timestamp in data)
             candle_close_time = data['timestamp'].iloc[-1]
 
-            # Log analysis and save to database
             _log_and_save_analysis(pair, timeframe, price, status, result, long_score, short_score,
                                    min_score, indicators, conditions, side, candle_close_time)
 
@@ -199,60 +223,23 @@ def _get_volume_ratio(data):
     return current_volume / avg_volume
 
 
-def _get_htf_confirmation(pair, higher_tf, htf_indicators_cache=None):
+def _get_htf_confirmation(pair, higher_tf):
     """
-    Higher timeframe confirmation.
+    Higher timeframe confirmation (LIVE mode only).
+
+    NOTE: In backtest mode, this function is NOT called.
+    Use get_htf_confirmation_from_cache() from backtest_cache module instead.
 
     Args:
         pair: Trading pair
         higher_tf: Higher timeframe to check
-        htf_indicators_cache: Optional pre-calculated indicators dict from backtest mode
+        htf_indicators_cache: Deprecated parameter (not used)
 
     Returns:
         Tuple of (confirm_long, confirm_short)
     """
-    from app.config import BACKTEST_MODE
-    from app.data_provider import _backtest_current_timestamp
-
     try:
-        # In backtest mode with pre-calculated indicators, use them directly
-        if BACKTEST_MODE and htf_indicators_cache:
-            current_ts = _backtest_current_timestamp
-            if current_ts is None:
-                return True, True
-
-            # Get indicators for the higher timeframe at the current timestamp
-            indicators_key = f'{higher_tf}_indicators'
-            if indicators_key in htf_indicators_cache:
-                indicators = htf_indicators_cache[indicators_key]
-
-                # Find the most recent HTF candle at or before current timestamp
-                # We need to look back because HTF candles close less frequently
-                htf_candles = htf_indicators_cache.get(higher_tf)
-                if htf_candles is not None and len(htf_candles) > 0:
-                    # Filter to candles at or before current time
-                    valid_candles = htf_candles[htf_candles['timestamp'] <= current_ts]
-                    if len(valid_candles) == 0:
-                        return True, True
-
-                    # Get the most recent HTF timestamp
-                    htf_ts = valid_candles['timestamp'].iloc[-1]
-
-                    # Lookup pre-calculated indicators at that timestamp
-                    ht_rsi = indicators['rsi'].get(htf_ts)
-                    ht_macd = indicators['macd'].get(htf_ts)
-                    ht_signal = indicators['macd_signal'].get(htf_ts)
-
-                    if ht_rsi is None or ht_macd is None or ht_signal is None:
-                        return True, True
-
-                    # HTF confirmation logic
-                    confirm_long = ht_rsi > 45 and ht_macd > ht_signal and (ht_macd - ht_signal) > 0.5
-                    confirm_short = ht_rsi < 55 and ht_macd < ht_signal and (ht_signal - ht_macd) > 0.5
-
-                    return confirm_long, confirm_short
-
-        # Fall back to live calculation (for live mode or if cache not available)
+        # Live calculation only
         hdf = fetch_ohlcv_df([pair], higher_tf).get(pair)
         if hdf is None or len(hdf) < 30:
             return True, True
@@ -302,7 +289,21 @@ def _calculate_sl_tp(price, atr, side, pair):
 
 
 def _calculate_technical_indicators(data, price):
-    """Calculate all technical indicators"""
+    """
+    Calculate all technical indicators from data (LIVE mode only).
+
+    NOTE: In backtest mode, this function is NOT called.
+    Use get_indicators_from_cache() from backtest_cache module instead.
+
+    Args:
+        data: DataFrame with OHLCV data
+        price: Current price
+        indicators_cache: Deprecated parameter (not used)
+
+    Returns:
+        TechnicalIndicators object
+    """
+    # Live calculation only
     volume_ratio = _get_volume_ratio(data)
 
     rsi = RSIIndicator(data['close'], window=RSI_PERIOD).rsi().iloc[-1]
@@ -362,7 +363,19 @@ def _calculate_technical_indicators(data, price):
 
 
 def _calculate_market_conditions(data, indicators, timeframe, pair):
-    """Calculate all market conditions and filters"""
+    """
+    Calculate all market conditions and filters (LIVE mode only).
+
+    NOTE: In backtest mode, this function is NOT called.
+    Use get_conditions_from_cache() from backtest_cache module instead.
+
+    Args:
+        data: OHLCV DataFrame
+        indicators: TechnicalIndicators object
+        timeframe: Trading timeframe
+        pair: Trading pair
+        sma_cache: Deprecated parameter (not used)
+    """
     volume_pass = not VOLUME_CONFIRMATION_ENABLED or _check_volume_confirmation(data, timeframe)
     atr_pass = indicators.atr_pct >= MIN_ATR_RATIO
 
@@ -409,7 +422,7 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
             rsi_ok_long = indicators.rsi < RSI_OVERSOLD
             rsi_ok_short = indicators.rsi > RSI_OVERBOUGHT
 
-    # Trend filter logic
+    # Trend filter logic (live calculation only)
     if USE_TREND_FILTER:
         sma = data['close'].rolling(window=TREND_MA_PERIOD).mean()
         recent_closes = data['close'].iloc[-REQUIRED_MA_BARS:]
@@ -426,19 +439,11 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
     else:
         stoch_ok_long = stoch_ok_short = True  # Allow signals when disabled
 
-    # Higher timeframe confirmation
+    # Higher timeframe confirmation (live calculation only)
     if USE_HIGHER_TF_CONFIRM:
         higher_tf = HIGHER_TF_MAP.get(timeframe)
         if higher_tf:
-            # Get HTF indicators cache for backtest mode
-            from app.config import BACKTEST_MODE
-            from app.data_provider import _backtest_data_cache
-
-            htf_cache = None
-            if BACKTEST_MODE and pair in _backtest_data_cache:
-                htf_cache = _backtest_data_cache[pair]
-
-            confirm_long, confirm_short = _get_htf_confirmation(pair, higher_tf, htf_cache)
+            confirm_long, confirm_short = _get_htf_confirmation(pair, higher_tf)
         else:
             confirm_long = confirm_short = True
     else:
@@ -491,6 +496,7 @@ def _calculate_scores(indicators, conditions, timeframe):
 def _determine_signal_side(long_score, short_score, min_score, conditions, indicators, timeframe):
     """Determine signal side and status based on scores and conditions"""
     # Determine signal side based on scoring system only
+    global none_reason
     if long_score >= min_score and long_score >= short_score:
         side = "LONG"
     elif short_score >= min_score:

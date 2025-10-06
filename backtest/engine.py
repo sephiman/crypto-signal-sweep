@@ -52,6 +52,7 @@ class BacktestEngine:
         self.completed_signals = []
         self.first_signal_logged = False
         self.pending_updates = 0  # Track uncommitted updates for batch commits
+        self.signal_buffer = []  # Buffer for bulk write at end
 
     def run(self):
         """Execute the backtest"""
@@ -83,6 +84,7 @@ class BacktestEngine:
             # Walk forward through time
             logger.warning(f"Walking forward from {self.start_date} to {self.end_date}")
             current_time = self.start_date
+            start_time = datetime.now()
 
             total_bars = int((self.end_date - self.start_date).total_seconds() / 60)
             processed_bars = 0
@@ -113,7 +115,21 @@ class BacktestEngine:
                     progress = (processed_bars / total_bars) * 100
                     active = len(self.active_signals)
                     completed = len(self.completed_signals)
-                    logger.warning(f"PROGRESS: {current_time.strftime('%Y-%m-%d')} | {progress:.1f}% | Total: {active + completed} (Active: {active}, Completed: {completed})")
+
+                    # Calculate timing information
+                    elapsed = datetime.now() - start_time
+                    elapsed_str = str(elapsed).split('.')[0]  # Remove microseconds
+
+                    # Estimate remaining time
+                    if progress > 0:
+                        total_estimated = elapsed / (progress / 100)
+                        remaining = total_estimated - elapsed
+                        remaining_str = str(remaining).split('.')[0]
+                        eta_str = f" | ETA: {remaining_str}"
+                    else:
+                        eta_str = ""
+
+                    logger.warning(f"PROGRESS: {current_time.strftime('%Y-%m-%d')} | {progress:.1f}% | Elapsed: {elapsed_str}{eta_str} | Total: {active + completed} (Active: {active}, Completed: {completed})")
                     next_log += log_interval
 
             # Final commit for any pending updates
@@ -123,7 +139,11 @@ class BacktestEngine:
 
             # Complete the backtest run
             self._complete_backtest_run(db)
-            logger.warning(f"Backtest run {self.run_id} completed")
+
+            # Log final timing summary
+            total_elapsed = datetime.now() - start_time
+            total_elapsed_str = str(total_elapsed).split('.')[0]
+            logger.warning(f"Backtest run {self.run_id} completed in {total_elapsed_str}")
 
         except Exception as e:
             logger.error(f"Backtest failed: {e}")
@@ -213,28 +233,135 @@ class BacktestEngine:
                     timeframes_data[tf] = df_resampled
                     logger.info(f"{pair}: Pre-computed {len(df_resampled)} {tf} candles")
 
-                    # Pre-calculate indicators for higher timeframes used in confirmation
-                    if tf in htf_to_precompute and len(df_resampled) >= 30:
+                    # Pre-calculate ALL indicators for this timeframe (for performance)
+                    if len(df_resampled) >= 50:
                         try:
+                            logger.warning(f"{pair} {tf}: Starting indicator pre-calculation...")
+
+                            # Import all indicator classes
+                            from ta.momentum import RSIIndicator, StochasticOscillator
+                            from ta.trend import MACD, ADXIndicator
+                            from ta.volatility import AverageTrueRange, BollingerBands
+                            from app.config import (
+                                RSI_PERIOD, MACD_FAST, MACD_SLOW, MACD_SIGNAL,
+                                EMA_FAST, EMA_SLOW, ATR_PERIOD, ADX_PERIOD,
+                                STOCH_ENABLED, STOCH_K_PERIOD, STOCH_D_PERIOD,
+                                BB_ENABLED, BB_PERIOD, BB_STD_DEV,
+                                USE_TREND_FILTER, TREND_MA_PERIOD
+                            )
+
+                            # Calculate RSI
                             rsi_obj = RSIIndicator(df_resampled['close'], window=RSI_PERIOD)
+                            rsi_series = rsi_obj.rsi()
+
+                            # Calculate MACD
                             macd_obj = MACD(
                                 close=df_resampled['close'],
                                 window_slow=MACD_SLOW,
                                 window_fast=MACD_FAST,
                                 window_sign=MACD_SIGNAL
                             )
+                            macd_series = macd_obj.macd()
+                            macd_signal_series = macd_obj.macd_signal()
+                            macd_diff_series = macd_series - macd_signal_series
+
+                            # Calculate EMAs
+                            ema_fast_series = df_resampled['close'].ewm(span=EMA_FAST).mean()
+                            ema_slow_series = df_resampled['close'].ewm(span=EMA_SLOW).mean()
+                            ema_diff_series = abs(ema_fast_series - ema_slow_series)
+
+                            # Calculate ATR
+                            atr_obj = AverageTrueRange(
+                                high=df_resampled['high'],
+                                low=df_resampled['low'],
+                                close=df_resampled['close'],
+                                window=ATR_PERIOD
+                            )
+                            atr_series = atr_obj.average_true_range()
+                            atr_pct_series = atr_series / df_resampled['close']
+
+                            # Calculate ADX
+                            adx_obj = ADXIndicator(
+                                high=df_resampled['high'],
+                                low=df_resampled['low'],
+                                close=df_resampled['close'],
+                                window=ADX_PERIOD
+                            )
+                            adx_series = adx_obj.adx()
+
+                            # Calculate Stochastic
+                            if STOCH_ENABLED:
+                                stoch_obj = StochasticOscillator(
+                                    high=df_resampled['high'],
+                                    low=df_resampled['low'],
+                                    close=df_resampled['close'],
+                                    window=STOCH_K_PERIOD,
+                                    smooth_window=STOCH_D_PERIOD
+                                )
+                                stoch_k_series = stoch_obj.stoch()
+                                stoch_d_series = stoch_obj.stoch_signal()
+                            else:
+                                stoch_k_series = pd.Series([50] * len(df_resampled), index=df_resampled.index)
+                                stoch_d_series = pd.Series([50] * len(df_resampled), index=df_resampled.index)
+
+                            # Calculate Bollinger Bands
+                            if BB_ENABLED and len(df_resampled) >= BB_PERIOD + 1:
+                                bb_obj = BollingerBands(
+                                    close=df_resampled['close'],
+                                    window=BB_PERIOD,
+                                    window_dev=BB_STD_DEV
+                                )
+                                bb_upper = bb_obj.bollinger_hband()
+                                bb_lower = bb_obj.bollinger_lband()
+                                bb_width_series = (bb_upper - bb_lower) / df_resampled['close']
+                            else:
+                                bb_width_series = pd.Series([0.0] * len(df_resampled), index=df_resampled.index)
+
+                            # Calculate volume ratio (rolling 20-period)
+                            volume_ma = df_resampled['volume'].rolling(window=20, min_periods=1).mean()
+                            volume_ratio_series = df_resampled['volume'] / volume_ma.shift(1)
+                            volume_ratio_series = volume_ratio_series.fillna(1.0)
+
+                            # Calculate SMA for trend filter (if enabled)
+                            if USE_TREND_FILTER:
+                                sma_series = df_resampled['close'].rolling(window=TREND_MA_PERIOD).mean()
+                            else:
+                                sma_series = pd.Series([0.0] * len(df_resampled), index=df_resampled.index)
 
                             # Create timestamp-indexed dictionaries for O(1) lookup
                             indicators_dict = {
-                                'rsi': dict(zip(df_resampled['timestamp'], rsi_obj.rsi())),
-                                'macd': dict(zip(df_resampled['timestamp'], macd_obj.macd())),
-                                'macd_signal': dict(zip(df_resampled['timestamp'], macd_obj.macd_signal()))
+                                'rsi': dict(zip(df_resampled['timestamp'], rsi_series)),
+                                'macd': dict(zip(df_resampled['timestamp'], macd_series)),
+                                'macd_signal': dict(zip(df_resampled['timestamp'], macd_signal_series)),
+                                'macd_diff': dict(zip(df_resampled['timestamp'], macd_diff_series)),
+                                'ema_fast': dict(zip(df_resampled['timestamp'], ema_fast_series)),
+                                'ema_slow': dict(zip(df_resampled['timestamp'], ema_slow_series)),
+                                'ema_diff': dict(zip(df_resampled['timestamp'], ema_diff_series)),
+                                'atr': dict(zip(df_resampled['timestamp'], atr_series)),
+                                'atr_pct': dict(zip(df_resampled['timestamp'], atr_pct_series)),
+                                'adx': dict(zip(df_resampled['timestamp'], adx_series)),
+                                'stoch_k': dict(zip(df_resampled['timestamp'], stoch_k_series)),
+                                'stoch_d': dict(zip(df_resampled['timestamp'], stoch_d_series)),
+                                'bb_width': dict(zip(df_resampled['timestamp'], bb_width_series)),
+                                'volume_ratio': dict(zip(df_resampled['timestamp'], volume_ratio_series)),
+                                'sma': dict(zip(df_resampled['timestamp'], sma_series))
                             }
 
                             timeframes_data[f'{tf}_indicators'] = indicators_dict
-                            logger.info(f"{pair}: Pre-computed {tf} indicators (RSI, MACD) for HTF confirmation")
+
+                            # Calculate memory usage for this cache
+                            indicator_count = len(indicators_dict)
+                            values_per_indicator = len(df_resampled)
+                            total_values = indicator_count * values_per_indicator
+                            estimated_mb = (total_values * 8) / (1024 * 1024)  # 8 bytes per float
+
+                            logger.warning(
+                                f"{pair} {tf}: ✅ Pre-computed ALL indicators | "
+                                f"Indicators: {indicator_count} (inc. SMA) | Candles: {values_per_indicator} | "
+                                f"Total values: {total_values:,} | Est. memory: ~{estimated_mb:.2f} MB"
+                            )
                         except Exception as e:
-                            logger.warning(f"{pair}: Failed to pre-compute {tf} indicators: {e}")
+                            logger.warning(f"{pair} {tf}: ❌ Failed to pre-compute indicators: {e}")
 
             data_cache[pair] = timeframes_data
 
@@ -343,12 +470,10 @@ class BacktestEngine:
                 }
                 logger.info(f"Added active signal: {key} - {signal['side']} at {signal['price']}, SL:{signal['stop_loss']}, TP1:{signal['take_profit_1']}, TP2:{signal['take_profit_2']}")
 
-            # Batch insert all new signals at once
+            # Buffer signals for bulk write at end (performance optimization)
             if new_signal_records:
-                # Use add_all instead of bulk_save_objects to keep objects in session
-                db.add_all(new_signal_records)
-                db.commit()
-                logger.info(f"Generated {len(new_signal_records)} signals. Active signals: {len(self.active_signals)}")
+                self.signal_buffer.extend(new_signal_records)
+                logger.info(f"Buffered {len(new_signal_records)} signals. Active signals: {len(self.active_signals)}, Total buffered: {len(self.signal_buffer)}")
 
         except Exception as e:
             logger.error(f"Error generating signals for {timeframe} at {current_time}: {e}")
@@ -528,6 +653,14 @@ class BacktestEngine:
     def _complete_backtest_run(self, db: Session):
         """Mark backtest run as completed and calculate summary stats"""
         from sqlalchemy import func, case
+
+        # Bulk write all buffered signals at once (PERFORMANCE OPTIMIZATION)
+        if self.signal_buffer:
+            logger.warning(f"💾 Writing {len(self.signal_buffer)} signals to database in bulk...")
+            db.add_all(self.signal_buffer)
+            db.commit()
+            logger.warning(f"✅ Successfully wrote {len(self.signal_buffer)} signals to database")
+            self.signal_buffer = []  # Clear buffer
 
         run = db.query(BacktestRun).filter(BacktestRun.run_id == self.run_id).first()
 
