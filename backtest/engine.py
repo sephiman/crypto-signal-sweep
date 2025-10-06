@@ -5,6 +5,7 @@ Uses 1m precision for TP/SL simulation and aggregated timeframes for signal gene
 import logging
 import json
 import pandas as pd
+import bisect
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -53,17 +54,26 @@ class BacktestEngine:
         self.first_signal_logged = False
         self.pending_updates = 0  # Track uncommitted updates for batch commits
         self.signal_buffer = []  # Buffer for bulk write at end
+        self.candle_close_times = []  # Pre-computed candle close times for fast lookup
+
+        # Parallel mode support
+        self.worker_id = None  # Set by worker process
+        self.main_run_id = None  # Main run_id for parallel mode
+        self.is_worker = False  # Flag to indicate worker mode
 
     def run(self):
         """Execute the backtest"""
         db = SessionLocal()
         try:
+            # Add worker ID prefix if in worker mode
+            worker_prefix = f"[W{self.worker_id}] " if self.is_worker else ""
+
             # Create backtest run record
             self.run_id = self._create_backtest_run(db)
-            logger.warning(f"Starting backtest run {self.run_id}")
+            logger.warning(f"{worker_prefix}Starting backtest run {self.run_id}")
 
             # Load all 1m data into memory for each pair
-            logger.warning("Loading historical 1m data into memory...")
+            logger.warning(f"{worker_prefix}Loading historical 1m data into memory...")
             data_cache = self._load_historical_data(db)
 
             # Filter pairs to only those with data
@@ -75,19 +85,23 @@ class BacktestEngine:
 
             if len(available_pairs) < len(self.pairs):
                 missing_pairs = set(self.pairs) - set(available_pairs)
-                logger.warning(f"Skipping pairs without data: {missing_pairs}")
-                logger.warning(f"Running backtest on {len(available_pairs)} pairs: {available_pairs}")
+                logger.warning(f"{worker_prefix}Skipping pairs without data: {missing_pairs}")
+                logger.warning(f"{worker_prefix}Running backtest on {len(available_pairs)} pairs: {available_pairs}")
 
             # Set the data cache for data_provider
             set_backtest_data(data_cache)
 
+            # Pre-compute all candle close times for fast lookup
+            self.candle_close_times = self._precompute_candle_close_times()
+
             # Walk forward through time
-            logger.warning(f"Walking forward from {self.start_date} to {self.end_date}")
+            logger.warning(f"{worker_prefix}Walking forward from {self.start_date} to {self.end_date}")
             current_time = self.start_date
             start_time = datetime.now()
 
             total_bars = int((self.end_date - self.start_date).total_seconds() / 60)
             processed_bars = 0
+            skipped_bars = 0  # Track skipped timestamps for efficiency reporting
 
             # Pre-calculate log interval (every 1% or min 1000 bars)
             log_interval = max(1000, total_bars // 100)
@@ -106,9 +120,33 @@ class BacktestEngine:
                 # Check active signals for TP/SL hits using 1m precision
                 self._check_signal_hits(current_time, data_cache, db)
 
-                # Move to next minute
-                current_time += timedelta(minutes=1)
-                processed_bars += 1
+                # SMART TIME JUMPING: Skip empty minutes when no active signals
+                if self.active_signals:
+                    # Have active signals → must check every minute for TP/SL hits
+                    prev_time = current_time
+                    current_time += timedelta(minutes=1)
+                    processed_bars += 1
+                else:
+                    # No active signals → jump to next candle close time using pre-computed list
+                    prev_time = current_time
+
+                    # Fast O(log n) binary search lookup in pre-computed sorted list
+                    idx = bisect.bisect_right(self.candle_close_times, current_time)
+
+                    # Get next candle close time
+                    if idx < len(self.candle_close_times):
+                        next_time = self.candle_close_times[idx]
+                    else:
+                        # Reached end of pre-computed times (shouldn't happen)
+                        next_time = self._get_next_candle_close_time(current_time)
+
+                    current_time = next_time
+
+                    # Track statistics
+                    minutes_skipped = int((current_time - prev_time).total_seconds() / 60) - 1
+                    if minutes_skipped > 0:
+                        skipped_bars += minutes_skipped
+                    processed_bars += 1
 
                 # Log progress at intervals
                 if processed_bars >= next_log:
@@ -129,7 +167,14 @@ class BacktestEngine:
                     else:
                         eta_str = ""
 
-                    logger.warning(f"PROGRESS: {current_time.strftime('%Y-%m-%d')} | {progress:.1f}% | Elapsed: {elapsed_str}{eta_str} | Total: {active + completed} (Active: {active}, Completed: {completed})")
+                    # Calculate skip efficiency
+                    total_checked = processed_bars + skipped_bars
+                    skip_efficiency = (skipped_bars / total_checked * 100) if total_checked > 0 else 0
+
+                    # Add worker ID prefix if in worker mode
+                    worker_prefix = f"[W{self.worker_id}] " if self.is_worker else ""
+
+                    logger.warning(f"{worker_prefix}PROGRESS: {current_time.strftime('%Y-%m-%d')} | {progress:.1f}% | Elapsed: {elapsed_str}{eta_str} | Skipped: {skip_efficiency:.1f}% | Total: {active + completed} (Active: {active}, Completed: {completed})")
                     next_log += log_interval
 
             # Final commit for any pending updates
@@ -140,10 +185,13 @@ class BacktestEngine:
             # Complete the backtest run
             self._complete_backtest_run(db)
 
-            # Log final timing summary
+            # Log final timing and efficiency summary
             total_elapsed = datetime.now() - start_time
             total_elapsed_str = str(total_elapsed).split('.')[0]
-            logger.warning(f"Backtest run {self.run_id} completed in {total_elapsed_str}")
+            total_checked = processed_bars + skipped_bars
+            skip_efficiency = (skipped_bars / total_checked * 100) if total_checked > 0 else 0
+            logger.warning(f"{worker_prefix}Backtest run {self.run_id} completed in {total_elapsed_str}")
+            logger.warning(f"{worker_prefix}Performance: Processed {processed_bars:,} timestamps, Skipped {skipped_bars:,} ({skip_efficiency:.1f}% efficiency)")
 
         except Exception as e:
             logger.error(f"Backtest failed: {e}")
@@ -387,6 +435,135 @@ class BacktestEngine:
 
         return False
 
+    def _precompute_candle_close_times(self) -> List[datetime]:
+        """
+        Pre-compute all candle close times for configured timeframes.
+        Returns a sorted list of unique timestamps where any timeframe candle closes.
+        This is computed once at startup for O(1) lookups during backtest.
+        """
+        worker_prefix = f"[W{self.worker_id}] " if self.is_worker else ""
+        logger.warning(f"{worker_prefix}Pre-computing candle close times for fast lookup...")
+
+        close_times_set = set()
+
+        for tf in self.timeframes:
+            current = self.start_date
+
+            if tf == '1m':
+                # Every minute
+                while current <= self.end_date:
+                    close_times_set.add(current)
+                    current += timedelta(minutes=1)
+
+            elif tf == '5m':
+                # Align to 5-minute boundaries
+                current = current.replace(second=0, microsecond=0)
+                minutes_offset = current.minute % 5
+                if minutes_offset > 0:
+                    current += timedelta(minutes=5 - minutes_offset)
+
+                while current <= self.end_date:
+                    close_times_set.add(current)
+                    current += timedelta(minutes=5)
+
+            elif tf == '15m':
+                # Align to 15-minute boundaries (0, 15, 30, 45)
+                current = current.replace(second=0, microsecond=0)
+                minutes_offset = current.minute % 15
+                if minutes_offset > 0:
+                    current += timedelta(minutes=15 - minutes_offset)
+
+                while current <= self.end_date:
+                    close_times_set.add(current)
+                    current += timedelta(minutes=15)
+
+            elif tf == '1h':
+                # Align to hour boundaries
+                current = current.replace(minute=0, second=0, microsecond=0)
+                if current < self.start_date:
+                    current += timedelta(hours=1)
+
+                while current <= self.end_date:
+                    close_times_set.add(current)
+                    current += timedelta(hours=1)
+
+            elif tf == '4h':
+                # Align to 4-hour boundaries (0, 4, 8, 12, 16, 20)
+                current = current.replace(minute=0, second=0, microsecond=0)
+                hours_offset = current.hour % 4
+                if hours_offset > 0:
+                    current += timedelta(hours=4 - hours_offset)
+
+                while current <= self.end_date:
+                    close_times_set.add(current)
+                    current += timedelta(hours=4)
+
+            elif tf == '1d':
+                # Align to day boundaries (midnight)
+                current = current.replace(hour=0, minute=0, second=0, microsecond=0)
+                if current < self.start_date:
+                    current += timedelta(days=1)
+
+                while current <= self.end_date:
+                    close_times_set.add(current)
+                    current += timedelta(days=1)
+
+        # Convert to sorted list for fast iteration
+        close_times_sorted = sorted(close_times_set)
+
+        logger.warning(f"{worker_prefix}✅ Pre-computed {len(close_times_sorted):,} unique candle close times")
+
+        return close_times_sorted
+
+    def _get_next_candle_close_time(self, current_time: datetime) -> datetime:
+        """
+        Calculate the next timestamp where any configured timeframe candle closes.
+        Returns the earliest next candle close across all timeframes.
+        """
+        next_times = []
+
+        for tf in self.timeframes:
+            if tf == '1m':
+                # Next minute
+                next_times.append(current_time + timedelta(minutes=1))
+            elif tf == '5m':
+                # Next 5-minute boundary
+                minutes_until_next = 5 - (current_time.minute % 5)
+                if minutes_until_next == 0:
+                    minutes_until_next = 5
+                next_times.append(current_time + timedelta(minutes=minutes_until_next))
+            elif tf == '15m':
+                # Next 15-minute boundary
+                minutes_until_next = 15 - (current_time.minute % 15)
+                if minutes_until_next == 0:
+                    minutes_until_next = 15
+                next_times.append(current_time + timedelta(minutes=minutes_until_next))
+            elif tf == '1h':
+                # Next hour boundary
+                minutes_until_next = 60 - current_time.minute
+                if minutes_until_next == 0:
+                    minutes_until_next = 60
+                next_times.append(current_time + timedelta(minutes=minutes_until_next))
+            elif tf == '4h':
+                # Next 4-hour boundary
+                hours_until_next = 4 - (current_time.hour % 4)
+                if hours_until_next == 0:
+                    hours_until_next = 4
+                next_time = current_time.replace(minute=0, second=0, microsecond=0)
+                next_time += timedelta(hours=hours_until_next)
+                next_times.append(next_time)
+            elif tf == '1d':
+                # Next day boundary (midnight)
+                if current_time.hour == 0 and current_time.minute == 0:
+                    next_times.append(current_time + timedelta(days=1))
+                else:
+                    next_time = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+                    next_time += timedelta(days=1)
+                    next_times.append(next_time)
+
+        # Return the earliest next candle close
+        return min(next_times)
+
     def _generate_signals(self, current_time: datetime, timeframe: str, db: Session):
         """Generate signals for a timeframe at current time"""
         try:
@@ -620,8 +797,14 @@ class BacktestEngine:
 
     def _create_backtest_run(self, db: Session) -> int:
         """Create a new backtest run record"""
-        # Generate run_id (timestamp-based)
-        run_id = int(datetime.utcnow().timestamp())
+        # Worker mode: use provided main_run_id with worker in decimal places
+        # Add 1 to worker_id so workers use IDs 1-N (not 0-N) to avoid collision with main run
+        # E.g., main: 1977459200, worker 0: 1977459201, worker 1: 1977459202
+        if self.is_worker and self.main_run_id is not None:
+            run_id = self.main_run_id + self.worker_id + 1
+        else:
+            # Sequential mode: generate timestamp-based run_id
+            run_id = int(datetime.utcnow().timestamp())
 
         # Capture config snapshot
         config_snapshot = {
@@ -631,6 +814,7 @@ class BacktestEngine:
             'end_date': self.end_date.isoformat(),
             'atr_sl_multiplier': ATR_SL_MULTIPLIER,
             'atr_tp_multiplier': ATR_TP_MULTIPLIER,
+            'worker_id': self.worker_id if self.is_worker else None,
             # Add more config as needed
         }
 
@@ -654,14 +838,27 @@ class BacktestEngine:
         """Mark backtest run as completed and calculate summary stats"""
         from sqlalchemy import func, case
 
+        worker_prefix = f"[W{self.worker_id}] " if self.is_worker else ""
+
         # Bulk write all buffered signals at once (PERFORMANCE OPTIMIZATION)
         if self.signal_buffer:
-            logger.warning(f"💾 Writing {len(self.signal_buffer)} signals to database in bulk...")
+            logger.warning(f"{worker_prefix}💾 Writing {len(self.signal_buffer)} signals to database in bulk...")
             db.add_all(self.signal_buffer)
             db.commit()
-            logger.warning(f"✅ Successfully wrote {len(self.signal_buffer)} signals to database")
+            logger.warning(f"{worker_prefix}✅ Successfully wrote {len(self.signal_buffer)} signals to database")
             self.signal_buffer = []  # Clear buffer
 
+        # Worker mode: Skip stats calculation (main process will aggregate)
+        if self.is_worker:
+            run = db.query(BacktestRun).filter(BacktestRun.run_id == self.run_id).first()
+            if run:
+                run.status = 'completed'
+                run.completed_at = datetime.utcnow()
+                db.commit()
+            logger.warning(f"{worker_prefix}✅ Worker {self.worker_id} completed")
+            return
+
+        # Sequential mode: Calculate full stats
         run = db.query(BacktestRun).filter(BacktestRun.run_id == self.run_id).first()
 
         if not run:
@@ -709,21 +906,219 @@ class BacktestEngine:
             db.commit()
 
 
-def run_backtest():
-    """Main entry point for running a backtest"""
-    logger.warning("=" * 80)
-    logger.warning("BACKTEST MODE")
-    logger.warning("=" * 80)
+def run_backtest_worker(worker_id, pair_subset, timeframes, start_date, end_date, main_run_id):
+    """
+    Worker function for parallel backtest - runs in separate process.
 
-    engine = BacktestEngine(
-        pairs=PAIRS,
-        timeframes=TIMEFRAMES,
-        start_date=BACKTEST_START_DATE,
-        end_date=BACKTEST_END_DATE
-    )
+    Args:
+        worker_id: Unique worker identifier (0, 1, 2, 3...)
+        pair_subset: Subset of pairs for this worker
+        timeframes: List of timeframes
+        start_date: Start date string
+        end_date: End date string
+        main_run_id: Main run ID to attach worker results to
 
+    Returns:
+        Dict with worker results
+    """
+    logger.warning(f"[W{worker_id}] Worker {worker_id} starting with pairs: {pair_subset}")
+
+    # Create engine for this worker
+    engine = BacktestEngine(pair_subset, timeframes, start_date, end_date)
+
+    # Configure as worker
+    engine.is_worker = True
+    engine.worker_id = worker_id
+    engine.main_run_id = main_run_id
+
+    # Run backtest
     engine.run()
 
+    return {
+        'worker_id': worker_id,
+        'pairs': pair_subset,
+        'signal_count': len(engine.signal_buffer),
+        'run_id': engine.run_id
+    }
+
+
+def merge_worker_results(main_run_id, worker_results):
+    """
+    Merge all worker runs into main run and calculate final stats.
+
+    Args:
+        main_run_id: Main run ID
+        worker_results: List of dicts from workers
+    """
+    from sqlalchemy import func, case
+
+    db = SessionLocal()
+
+    try:
+        logger.warning(f"🔀 Merging {len(worker_results)} worker results into main run {main_run_id}")
+
+        # Update all worker signals to point to main run_id
+        total_signals = 0
+        for result in worker_results:
+            worker_run_id = result['run_id']
+
+            # Re-assign signals to main run
+            count = db.query(BacktestSignal).filter(
+                BacktestSignal.run_id == worker_run_id
+            ).update({'run_id': main_run_id})
+
+            total_signals += count
+            logger.warning(f"  [W{result['worker_id']}] Merged {count} signals from {len(result['pairs'])} pairs")
+
+            # Delete worker run record
+            db.query(BacktestRun).filter(
+                BacktestRun.run_id == worker_run_id
+            ).delete()
+
+        db.commit()
+
+        # Calculate final aggregated stats for main run
+        logger.warning(f"Calculating final stats for {total_signals} total signals...")
+
+        run = db.query(BacktestRun).filter(BacktestRun.run_id == main_run_id).first()
+        if not run:
+            logger.error(f"Main run {main_run_id} not found!")
+            return
+
+        # Use SQL aggregation
+        stats = db.query(
+            func.count(BacktestSignal.id).label('total'),
+            func.sum(case((BacktestSignal.hit == 'TP2', 1), else_=0)).label('winners'),
+            func.sum(case((BacktestSignal.hit == 'SL', 1), else_=0)).label('losers'),
+            func.sum(case((BacktestSignal.hit == 'TP1', 1), else_=0)).label('tp1_wins'),
+            func.sum(BacktestSignal.pnl_percent).label('total_pnl')
+        ).filter(BacktestSignal.run_id == main_run_id).first()
+
+        total_trades = stats.total or 0
+        winners = stats.winners or 0
+        losers = stats.losers or 0
+        tp1_wins = stats.tp1_wins or 0
+        total_pnl = stats.total_pnl or 0.0
+
+        win_rate = (winners / total_trades * 100) if total_trades > 0 else 0.0
+        avg_pnl = (total_pnl / total_trades) if total_trades > 0 else 0.0
+
+        # Update main run with final stats
+        run.status = 'completed'
+        run.total_trades = total_trades
+        run.total_winners = winners
+        run.total_losers = losers
+        run.total_breakeven = tp1_wins
+        run.win_rate = win_rate
+        run.total_pnl = total_pnl
+        run.avg_pnl_per_trade = avg_pnl
+        run.completed_at = datetime.utcnow()
+
+        db.commit()
+
+        logger.warning(f"✅ Merge complete: {total_trades} trades, {win_rate:.1f}% win rate")
+
+    finally:
+        db.close()
+
+
+def run_backtest_parallel():
+    """Main entry point for parallel backtest"""
+    from multiprocessing import Pool
+    from app.config import BACKTEST_WORKERS
+
+    n_workers = BACKTEST_WORKERS
+
     logger.warning("=" * 80)
-    logger.warning("BACKTEST COMPLETED")
+    logger.warning(f"PARALLEL BACKTEST MODE ({n_workers} workers)")
     logger.warning("=" * 80)
+
+    # Split pairs evenly across workers
+    pair_groups = [PAIRS[i::n_workers] for i in range(n_workers)]
+
+    logger.warning(f"Splitting {len(PAIRS)} pairs across {n_workers} workers:")
+    for i, group in enumerate(pair_groups):
+        logger.warning(f"  [W{i}] {len(group)} pairs: {group}")
+
+    # Create main run record
+    db = SessionLocal()
+
+    # Generate base run_id: timestamp with 2 decimal places for worker IDs
+    # Example: timestamp 1759774458, multiplied by 100 = 175977445800
+    # This allows workers 0-99 to be added: 175977445800, 175977445801, ..., 175977445899
+    # But 175977445800 exceeds INTEGER max (2,147,483,647)
+    # So we divide by 2 first: 1759774458 / 2 * 100 = 87988722900 (still too big!)
+    # Better: Use timestamp % 20,000,000 to stay under limit
+    # Example: 1759774458 % 20000000 = 19774458, * 100 = 1977445800 ✓ (under 2.1B)
+    timestamp = int(datetime.utcnow().timestamp())
+    main_run_id = (timestamp % 20000000) * 100
+
+    config_snapshot = {
+        'pairs': PAIRS,
+        'timeframes': TIMEFRAMES,
+        'start_date': BACKTEST_START_DATE,
+        'end_date': BACKTEST_END_DATE,
+        'parallel_workers': n_workers,
+        'atr_sl_multiplier': ATR_SL_MULTIPLIER,
+        'atr_tp_multiplier': ATR_TP_MULTIPLIER,
+    }
+
+    run = BacktestRun(
+        run_id=main_run_id,
+        start_date=datetime.strptime(BACKTEST_START_DATE, '%Y-%m-%d'),
+        end_date=datetime.strptime(BACKTEST_END_DATE, '%Y-%m-%d'),
+        pairs=json.dumps(PAIRS),
+        timeframes=json.dumps(TIMEFRAMES),
+        config_snapshot=json.dumps(config_snapshot),
+        status='running',
+        created_at=datetime.utcnow()
+    )
+
+    db.add(run)
+    db.commit()
+    db.close()
+
+    logger.warning(f"🚀 Created main run {main_run_id}, starting {n_workers} workers...")
+
+    # Run workers in parallel
+    with Pool(n_workers) as pool:
+        args = [
+            (i, pair_groups[i], TIMEFRAMES, BACKTEST_START_DATE, BACKTEST_END_DATE, main_run_id)
+            for i in range(n_workers)
+        ]
+        results = pool.starmap(run_backtest_worker, args)
+
+    logger.warning(f"✅ All {n_workers} workers completed, merging results...")
+
+    # Merge all worker results
+    merge_worker_results(main_run_id, results)
+
+    logger.warning("=" * 80)
+    logger.warning("PARALLEL BACKTEST COMPLETED")
+    logger.warning("=" * 80)
+
+
+def run_backtest():
+    """Main entry point for running a backtest"""
+    from app.config import BACKTEST_PARALLEL_ENABLED
+
+    if BACKTEST_PARALLEL_ENABLED:
+        run_backtest_parallel()
+    else:
+        # Sequential mode
+        logger.warning("=" * 80)
+        logger.warning("BACKTEST MODE")
+        logger.warning("=" * 80)
+
+        engine = BacktestEngine(
+            pairs=PAIRS,
+            timeframes=TIMEFRAMES,
+            start_date=BACKTEST_START_DATE,
+            end_date=BACKTEST_END_DATE
+        )
+
+        engine.run()
+
+        logger.warning("=" * 80)
+        logger.warning("BACKTEST COMPLETED")
+        logger.warning("=" * 80)
