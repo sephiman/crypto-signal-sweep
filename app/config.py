@@ -138,6 +138,7 @@ BACKTEST_END_DATE = os.getenv("BACKTEST_END_DATE", "2024-12-31")  # Format: YYYY
 BACKTEST_PARALLEL_ENABLED = os.getenv("BACKTEST_PARALLEL_ENABLED", "false").lower() == "true"
 BACKTEST_WORKERS = int(os.getenv("BACKTEST_WORKERS", "4"))
 COLLECT_HISTORICAL_DATA = os.getenv("COLLECT_HISTORICAL_DATA", "false").lower() == "true"
+SKIP_BACKTEST_RUN = os.getenv("SKIP_BACKTEST_RUN", "false").lower() == "true"  # Skip backtest execution when true
 SAVE_MARKET_ANALYSIS = os.getenv("SAVE_MARKET_ANALYSIS", "true").lower() == "true"  # Disable in backtest for speed
 BACKTEST_LOG_LEVEL = os.getenv("BACKTEST_LOG_LEVEL", "WARNING").upper()  # Set to WARNING/ERROR to reduce logging during backtest
 

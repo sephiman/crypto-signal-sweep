@@ -49,7 +49,7 @@ class BacktestEngine:
         self.start_date = datetime.strptime(start_date, '%Y-%m-%d')
         self.end_date = datetime.strptime(end_date, '%Y-%m-%d')
         self.run_id = None
-        self.active_signals = {}  # Track active signals per pair/timeframe
+        self.active_signals = {}  # Track active signals per (pair, timeframe) tuple
         self.completed_signals = []
         self.first_signal_logged = False
         self.pending_updates = 0  # Track uncommitted updates for batch commits
@@ -91,8 +91,20 @@ class BacktestEngine:
             # Set the data cache for data_provider
             set_backtest_data(data_cache)
 
+            # Pre-build flat candle lookup for O(1) access (instead of nested dicts)
+            logger.warning(f"{worker_prefix}Building flat candle lookup index...")
+            self.candle_lookup = {}
+            for pair in data_cache:
+                pair_1m_indexed = data_cache[pair].get('1m_indexed', {})
+                for ts, candle_data in pair_1m_indexed.items():
+                    self.candle_lookup[(pair, ts)] = candle_data
+            logger.warning(f"{worker_prefix}✅ Built lookup index with {len(self.candle_lookup):,} entries")
+
             # Pre-compute all candle close times for fast lookup
             self.candle_close_times = self._precompute_candle_close_times()
+
+            # Pre-compute timeframe check schedule
+            self.timeframe_schedule = self._precompute_timeframe_schedule()
 
             # Walk forward through time
             logger.warning(f"{worker_prefix}Walking forward from {self.start_date} to {self.end_date}")
@@ -111,11 +123,9 @@ class BacktestEngine:
                 # Update data provider with current timestamp
                 set_backtest_timestamp(current_time)
 
-                # Process each timeframe
-                for timeframe in self.timeframes:
-                    # Check if we should generate signals for this timeframe at this time
-                    if self._should_check_timeframe(current_time, timeframe):
-                        self._generate_signals(current_time, timeframe, db)
+                # Process timeframes that need checking at this time (pre-computed)
+                for timeframe in self.timeframe_schedule.get(current_time, []):
+                    self._generate_signals(current_time, timeframe, db)
 
                 # Check active signals for TP/SL hits using 1m precision
                 self._check_signal_hits(current_time, data_cache, db)
@@ -415,6 +425,32 @@ class BacktestEngine:
 
         return data_cache
 
+    def _precompute_timeframe_schedule(self) -> Dict[datetime, List[str]]:
+        """
+        Pre-compute which timeframes need to be checked at each timestamp.
+        Returns: {timestamp: [list of timeframes to check]}
+        """
+        worker_prefix = f"[W{self.worker_id}] " if self.is_worker else ""
+        logger.warning(f"{worker_prefix}Pre-computing timeframe check schedule...")
+
+        schedule = {}
+        current = self.start_date
+
+        while current <= self.end_date:
+            # Determine which timeframes to check at this time
+            timeframes_to_check = []
+            for tf in self.timeframes:
+                if self._should_check_timeframe(current, tf):
+                    timeframes_to_check.append(tf)
+
+            if timeframes_to_check:
+                schedule[current] = timeframes_to_check
+
+            current += timedelta(minutes=1)
+
+        logger.warning(f"{worker_prefix}✅ Pre-computed schedule for {len(schedule):,} timestamps")
+        return schedule
+
     def _should_check_timeframe(self, current_time: datetime, timeframe: str) -> bool:
         """
         Determine if we should check for signals on this timeframe at this time.
@@ -564,6 +600,30 @@ class BacktestEngine:
         # Return the earliest next candle close
         return min(next_times)
 
+    def _estimate_min_candles_to_target(self, entry: float, targets: List[float], atr: float) -> int:
+        """
+        Estimate minimum candles before price could reach any target.
+        Conservative estimate based on ATR (average movement per candle).
+
+        Args:
+            entry: Entry price
+            targets: List of target prices (TP1, TP2, SL)
+            atr: Average True Range value
+
+        Returns:
+            Estimated number of 1m candles before checking (1-60 range)
+        """
+        if atr == 0 or not targets:
+            return 1  # Check immediately if no volatility data or no targets
+
+        min_distance = min(abs(target - entry) for target in targets)
+        # Assume price moves at 0.5 * ATR per candle (conservative estimate)
+        # This means we check well before the target could be hit
+        estimated_candles = int(min_distance / (atr * 0.5))
+
+        # Check at least every minute, max skip is 60 candles (1 hour)
+        return max(1, min(estimated_candles, 60))
+
     def _generate_signals(self, current_time: datetime, timeframe: str, db: Session):
         """Generate signals for a timeframe at current time"""
         try:
@@ -580,11 +640,11 @@ class BacktestEngine:
             for signal in signals:
                 # Log first signal generation
                 if not self.first_signal_logged:
-                    logger.warning(f"🎯 First signal generated: {signal['pair']} {timeframe} {signal['side']} at {current_time}")
+                    logger.debug(f"🎯 First signal generated: {signal['pair']} {timeframe} {signal['side']} at {current_time}")
                     self.first_signal_logged = True
 
                 # Skip if we already have an active signal for this pair/timeframe
-                key = f"{signal['pair']}_{timeframe}"
+                key = (signal['pair'], timeframe)  # Tuple key for faster hashing
                 if key in self.active_signals:
                     continue
 
@@ -634,16 +694,45 @@ class BacktestEngine:
 
                 new_signal_records.append(signal_record)
 
-                # Track as active signal
+                # Track as active signal with pre-calculated PnL values
+                entry = float(signal['price'])
+                tp1 = float(signal['take_profit_1'])
+                tp2 = float(signal['take_profit_2'])
+                sl = float(signal['stop_loss'])
+                side = signal['side']
+
+                # Pre-calculate all possible PnL outcomes to avoid arithmetic in hot loop
+                if side == 'LONG':
+                    pnl_tp1 = ((tp1 - entry) / entry) * 100
+                    pnl_tp2 = ((tp2 - entry) / entry) * 100
+                    pnl_sl = ((sl - entry) / entry) * 100
+                else:  # SHORT
+                    pnl_tp1 = ((entry - tp1) / entry) * 100
+                    pnl_tp2 = ((entry - tp2) / entry) * 100
+                    pnl_sl = ((entry - sl) / entry) * 100
+
+                # Estimate when to start checking this signal (skip early checks if far from targets)
+                targets = [tp1, tp2, sl]
+                atr = float(signal['atr'])
+                skip_candles = self._estimate_min_candles_to_target(entry, targets, atr)
+                next_check = current_time + timedelta(minutes=skip_candles)
+
                 self.active_signals[key] = {
                     'record': signal_record,
-                    'entry_price': float(signal['price']),
-                    'sl': float(signal['stop_loss']),
-                    'tp1': float(signal['take_profit_1']),
-                    'tp2': float(signal['take_profit_2']),
-                    'side': signal['side'],
+                    'entry_price': entry,
+                    'sl': sl,
+                    'tp1': tp1,
+                    'tp2': tp2,
+                    'side': side,
                     'sl_moved_to_be': False,
-                    'tp1_hit': False
+                    'tp1_hit': False,
+                    # Pre-calculated PnL values
+                    'pnl_tp1': pnl_tp1,
+                    'pnl_tp2': pnl_tp2,
+                    'pnl_sl': pnl_sl,
+                    # Smart check timing
+                    'next_check_time': next_check,
+                    'atr': atr  # Store for recalculation after TP1
                 }
                 logger.info(f"Added active signal: {key} - {signal['side']} at {signal['price']}, SL:{signal['stop_loss']}, TP1:{signal['take_profit_1']}, TP2:{signal['take_profit_2']}")
 
@@ -669,16 +758,15 @@ class BacktestEngine:
         keys_to_remove = []
 
         for key, signal_data in self.active_signals.items():
-            # Get the 1m candle using pre-indexed dict (O(1) lookup)
-            pair = signal_data['record'].pair
-            if pair not in data_cache:
-                logger.warning(f"❌ Pair {pair} not in data_cache")
+            # Skip if too early to check (signal far from targets)
+            if current_time < signal_data.get('next_check_time', current_time):
                 continue
 
-            candle = data_cache[pair]['1m_indexed'].get(current_time)
+            # Get the 1m candle using flat lookup (single O(1) dict access)
+            pair = signal_data['record'].pair
+            candle = self.candle_lookup.get((pair, current_time))
             if not candle:
-                logger.warning(f"❌ No 1m candle for {pair} at {current_time}")
-                continue
+                continue  # No candle at this time, skip (normal during gaps)
 
             # Extract candle data
             high = candle['high']
@@ -701,7 +789,13 @@ class BacktestEngine:
                     signal_data['sl_moved_to_be'] = True
                     signal_data['sl'] = entry
                     record.sl_moved_to_be = True
-                    logger.info(f"🎯 {pair} LONG: TP1 hit at {current_time}, SL moved to BE")
+
+                    # Recalculate next check time for TP2/BE targets
+                    targets = [tp2, entry]  # TP2 and breakeven
+                    skip_candles = self._estimate_min_candles_to_target(entry, targets, signal_data['atr'])
+                    signal_data['next_check_time'] = current_time + timedelta(minutes=skip_candles)
+
+                    logger.info(f"🎯 {pair} LONG: TP1 hit at {current_time}, SL moved to BE, next check in {skip_candles}m")
                     continue
 
                 # If TP1 was hit, check for TP2 or BE
@@ -712,7 +806,7 @@ class BacktestEngine:
                         record.hit = 'TP2'
                         record.hit_timestamp = current_time
                         record.hit_price = tp2
-                        record.pnl_percent = ((tp2 - entry) / entry) * 100
+                        record.pnl_percent = signal_data['pnl_tp2']  # Use pre-calculated value
                         keys_to_remove.append(key)
                         self.completed_signals.append(record)
                         logger.info(f"✅ {pair} LONG: TP2 hit at {current_time}, PnL: {record.pnl_percent:.2f}%")
@@ -722,7 +816,7 @@ class BacktestEngine:
                         record.hit = 'TP1'
                         record.hit_timestamp = current_time
                         record.hit_price = entry  # Closed at entry (BE)
-                        record.pnl_percent = ((tp1 - entry) / entry) * 100
+                        record.pnl_percent = signal_data['pnl_tp1']  # Use pre-calculated value
                         keys_to_remove.append(key)
                         self.completed_signals.append(record)
                         logger.info(f"🎯 {pair} LONG: TP1 secured (closed at BE) at {current_time}, PnL: {record.pnl_percent:.2f}%")
@@ -733,7 +827,7 @@ class BacktestEngine:
                         record.hit = 'SL'
                         record.hit_timestamp = current_time
                         record.hit_price = sl
-                        record.pnl_percent = ((sl - entry) / entry) * 100
+                        record.pnl_percent = signal_data['pnl_sl']  # Use pre-calculated value
                         keys_to_remove.append(key)
                         self.completed_signals.append(record)
                         logger.info(f"❌ {pair} LONG: SL hit at {current_time}, PnL: {record.pnl_percent:.2f}%")
@@ -746,7 +840,13 @@ class BacktestEngine:
                     signal_data['sl_moved_to_be'] = True
                     signal_data['sl'] = entry
                     record.sl_moved_to_be = True
-                    logger.info(f"🎯 {pair} SHORT: TP1 hit at {current_time}, SL moved to BE")
+
+                    # Recalculate next check time for TP2/BE targets
+                    targets = [tp2, entry]  # TP2 and breakeven
+                    skip_candles = self._estimate_min_candles_to_target(entry, targets, signal_data['atr'])
+                    signal_data['next_check_time'] = current_time + timedelta(minutes=skip_candles)
+
+                    logger.info(f"🎯 {pair} SHORT: TP1 hit at {current_time}, SL moved to BE, next check in {skip_candles}m")
                     continue
 
                 # If TP1 was hit, check for TP2 or BE
@@ -757,7 +857,7 @@ class BacktestEngine:
                         record.hit = 'TP2'
                         record.hit_timestamp = current_time
                         record.hit_price = tp2
-                        record.pnl_percent = ((entry - tp2) / entry) * 100
+                        record.pnl_percent = signal_data['pnl_tp2']  # Use pre-calculated value
                         keys_to_remove.append(key)
                         self.completed_signals.append(record)
                         logger.info(f"✅ {pair} SHORT: TP2 hit at {current_time}, PnL: {record.pnl_percent:.2f}%")
@@ -767,7 +867,7 @@ class BacktestEngine:
                         record.hit = 'TP1'
                         record.hit_timestamp = current_time
                         record.hit_price = entry  # Closed at entry (BE)
-                        record.pnl_percent = ((entry - tp1) / entry) * 100
+                        record.pnl_percent = signal_data['pnl_tp1']  # Use pre-calculated value
                         keys_to_remove.append(key)
                         self.completed_signals.append(record)
                         logger.info(f"🎯 {pair} SHORT: TP1 secured (closed at BE) at {current_time}, PnL: {record.pnl_percent:.2f}%")
@@ -778,7 +878,7 @@ class BacktestEngine:
                         record.hit = 'SL'
                         record.hit_timestamp = current_time
                         record.hit_price = sl
-                        record.pnl_percent = ((entry - sl) / entry) * 100
+                        record.pnl_percent = signal_data['pnl_sl']  # Use pre-calculated value
                         keys_to_remove.append(key)
                         self.completed_signals.append(record)
                         logger.info(f"❌ {pair} SHORT: SL hit at {current_time}, PnL: {record.pnl_percent:.2f}%")
@@ -792,7 +892,7 @@ class BacktestEngine:
             self.pending_updates += len(keys_to_remove)
             if self.pending_updates >= 50:
                 db.commit()
-                logger.warning(f"💾 Database commit: {self.pending_updates} updates")
+                logger.debug(f"💾 Database commit: {self.pending_updates} updates")
                 self.pending_updates = 0
 
     def _create_backtest_run(self, db: Session) -> int:

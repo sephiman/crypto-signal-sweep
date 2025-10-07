@@ -5,7 +5,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from app.config import (
     TIMEFRAMES, RUN_AT_START, MARKET_SUMMARY_ENABLED,
-    BACKTEST_MODE, COLLECT_HISTORICAL_DATA, PAIRS, BACKTEST_LOG_LEVEL
+    BACKTEST_MODE, COLLECT_HISTORICAL_DATA, SKIP_BACKTEST_RUN, PAIRS, BACKTEST_LOG_LEVEL
 )
 from app.config import tf_to_minutes
 from app.jobs import run_analysis_job, run_midnight_summary_job, run_hit_polling_job, run_market_summary_job
@@ -81,15 +81,18 @@ if __name__ == "__main__":
             collect_historical_data(PAIRS, days=365)
             logging.info("Historical data collection completed")
 
-        # Run backtest
-        logging.info("Running backtest...")
-        from backtest.engine import run_backtest
-        run_backtest()
+        # Run backtest (unless skipped)
+        if not SKIP_BACKTEST_RUN:
+            logging.info("Running backtest...")
+            from backtest.engine import run_backtest
+            run_backtest()
 
-        # Analyze results
-        logging.info("Analyzing backtest results...")
-        from backtest.analyzer import analyze_backtest
-        analyze_backtest()
+            # Analyze results
+            logging.info("Analyzing backtest results...")
+            from backtest.analyzer import analyze_backtest
+            analyze_backtest()
+        else:
+            logging.info("Skipping backtest run (SKIP_BACKTEST_RUN=true)")
 
         logging.info("Backtest mode completed, exiting")
 
