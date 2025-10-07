@@ -1034,12 +1034,24 @@ def run_backtest_worker(worker_id, pair_subset, timeframes, start_date, end_date
     # Run backtest
     engine.run()
 
-    return {
+    # Store results before cleanup
+    result = {
         'worker_id': worker_id,
         'pairs': pair_subset,
         'signal_count': len(engine.signal_buffer),
         'run_id': engine.run_id
     }
+
+    # Explicit cleanup to free memory (important for one-at-a-time mode)
+    engine.candle_lookup = None
+    engine.candle_close_times = None
+    engine.timeframe_schedule = None
+    engine.active_signals.clear()
+    engine.completed_signals.clear()
+    engine.signal_buffer.clear()
+    del engine
+
+    return result
 
 
 def merge_worker_results(main_run_id, worker_results):
@@ -1259,9 +1271,13 @@ def run_backtest_one_at_a_time():
         worker_results.append(result)
         logger.warning(f"✅ [{i+1}/{len(PAIRS)}] Completed {pair}: {result['signal_count']} signals")
 
-        # Memory cleanup hint for garbage collector
+        # Aggressive memory cleanup for low-RAM systems
+        from app.data_provider import clear_backtest_data
+        clear_backtest_data()  # Clear global cache
+
         import gc
-        gc.collect()
+        gc.collect()  # Force garbage collection
+        logger.warning(f"🧹 Memory cleanup completed for {pair}")
 
     logger.warning(f"\n✅ All {len(PAIRS)} pairs completed, merging results...")
 

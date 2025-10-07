@@ -31,6 +31,17 @@ def set_backtest_timestamp(timestamp: datetime):
     _backtest_current_timestamp = timestamp
 
 
+def clear_backtest_data():
+    """
+    Clear the backtest data cache to free memory.
+    Called after processing each pair in one-at-a-time mode.
+    """
+    global _backtest_data_cache, _backtest_current_timestamp
+    _backtest_data_cache.clear()
+    _backtest_current_timestamp = None
+    logger.info("Backtest data cache cleared")
+
+
 def get_current_price(pair: str, timestamp: Optional[datetime] = None) -> float:
     """
     Get current price for a pair.
