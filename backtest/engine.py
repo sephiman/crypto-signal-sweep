@@ -1198,16 +1198,95 @@ def run_backtest_parallel():
     logger.warning("=" * 80)
 
 
+def run_backtest_one_at_a_time():
+    """
+    Run backtest one pair at a time to minimize memory usage.
+    Perfect for low-RAM systems (<8GB).
+    """
+    logger.warning("=" * 80)
+    logger.warning(f"ONE-PAIR-AT-A-TIME BACKTEST MODE ({len(PAIRS)} pairs)")
+    logger.warning("=" * 80)
+
+    # Create main run record
+    db = SessionLocal()
+    timestamp = int(datetime.utcnow().timestamp())
+    main_run_id = (timestamp % 20000000) * 100
+
+    config_snapshot = {
+        'pairs': PAIRS,
+        'timeframes': TIMEFRAMES,
+        'start_date': BACKTEST_START_DATE,
+        'end_date': BACKTEST_END_DATE,
+        'mode': 'one_pair_at_a_time',
+        'atr_sl_multiplier': ATR_SL_MULTIPLIER,
+        'atr_tp_multiplier': ATR_TP_MULTIPLIER,
+    }
+
+    run = BacktestRun(
+        run_id=main_run_id,
+        start_date=datetime.strptime(BACKTEST_START_DATE, '%Y-%m-%d'),
+        end_date=datetime.strptime(BACKTEST_END_DATE, '%Y-%m-%d'),
+        pairs=json.dumps(PAIRS),
+        timeframes=json.dumps(TIMEFRAMES),
+        config_snapshot=json.dumps(config_snapshot),
+        status='running',
+        created_at=datetime.utcnow()
+    )
+
+    db.add(run)
+    db.commit()
+    db.close()
+
+    logger.warning(f"🚀 Created main run {main_run_id}, processing {len(PAIRS)} pairs sequentially...")
+
+    # Process each pair one at a time
+    worker_results = []
+    for i, pair in enumerate(PAIRS):
+        logger.warning(f"\n{'='*80}")
+        logger.warning(f"[{i+1}/{len(PAIRS)}] Processing pair: {pair}")
+        logger.warning(f"{'='*80}")
+
+        # Run backtest for this single pair
+        result = run_backtest_worker(
+            worker_id=i,
+            pair_subset=[pair],  # Only one pair
+            timeframes=TIMEFRAMES,
+            start_date=BACKTEST_START_DATE,
+            end_date=BACKTEST_END_DATE,
+            main_run_id=main_run_id
+        )
+
+        worker_results.append(result)
+        logger.warning(f"✅ [{i+1}/{len(PAIRS)}] Completed {pair}: {result['signal_count']} signals")
+
+        # Memory cleanup hint for garbage collector
+        import gc
+        gc.collect()
+
+    logger.warning(f"\n✅ All {len(PAIRS)} pairs completed, merging results...")
+
+    # Merge all results
+    merge_worker_results(main_run_id, worker_results)
+
+    logger.warning("=" * 80)
+    logger.warning("ONE-PAIR-AT-A-TIME BACKTEST COMPLETED")
+    logger.warning("=" * 80)
+
+
 def run_backtest():
     """Main entry point for running a backtest"""
-    from app.config import BACKTEST_PARALLEL_ENABLED
+    from app.config import BACKTEST_PARALLEL_ENABLED, BACKTEST_ONE_PAIR_AT_A_TIME
 
-    if BACKTEST_PARALLEL_ENABLED:
+    if BACKTEST_ONE_PAIR_AT_A_TIME:
+        # One pair at a time mode (low RAM usage)
+        run_backtest_one_at_a_time()
+    elif BACKTEST_PARALLEL_ENABLED:
+        # Parallel mode (high RAM usage, fastest)
         run_backtest_parallel()
     else:
-        # Sequential mode
+        # Sequential mode - all pairs together (medium RAM usage)
         logger.warning("=" * 80)
-        logger.warning("BACKTEST MODE")
+        logger.warning("BACKTEST MODE (ALL PAIRS)")
         logger.warning("=" * 80)
 
         engine = BacktestEngine(
