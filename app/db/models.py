@@ -190,7 +190,7 @@ class BacktestRun(Base):
     total_trades = Column(Integer, nullable=True)
     total_winners = Column(Integer, nullable=True)
     total_losers = Column(Integer, nullable=True)
-    total_breakeven = Column(Integer, nullable=True)
+    total_tp1_wins = Column(Integer, nullable=True)
     win_rate = Column(Float, nullable=True)
     total_pnl = Column(Float, nullable=True)
     avg_pnl_per_trade = Column(Float, nullable=True)

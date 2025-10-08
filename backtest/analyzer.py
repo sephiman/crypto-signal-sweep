@@ -88,9 +88,10 @@ class BacktestAnalyzer:
         logger.info("\n--- OVERALL PERFORMANCE ---")
         logger.info(f"Total Trades: {self.run.total_trades or 0}")
         logger.info(f"Winners (TP2): {self.run.total_winners or 0}")
-        logger.info(f"Partial Winners (TP1): {self.run.total_breakeven or 0}")  # TP1 stored in breakeven field
+        logger.info(f"Partial Winners (TP1): {self.run.total_tp1_wins or 0}")
         logger.info(f"Losers (SL): {self.run.total_losers or 0}")
-        logger.info(f"Win Rate: {self.run.win_rate or 0:.2f}%")
+        total_wins = (self.run.total_winners or 0) + (self.run.total_tp1_wins or 0)
+        logger.info(f"Win Rate: {self.run.win_rate or 0:.2f}% (TP2 + TP1 = {total_wins} wins)")
         logger.info(f"Total PnL: {self.run.total_pnl or 0:.2f}%")
         logger.info(f"Avg PnL per Trade: {self.run.avg_pnl_per_trade or 0:.2f}%")
 
@@ -138,9 +139,9 @@ class BacktestAnalyzer:
         logger.info(f"Avg Winner: {avg_winner:.2f}%")
         logger.info(f"Avg Loser: {avg_loser:.2f}%")
 
-        # Update run record with these metrics
-        self.run.max_drawdown = max_drawdown
-        self.run.sharpe_ratio = sharpe_ratio
+        # Update run record with these metrics (convert numpy types to Python types)
+        self.run.max_drawdown = float(max_drawdown) if not pd.isna(max_drawdown) else None
+        self.run.sharpe_ratio = float(sharpe_ratio) if not pd.isna(sharpe_ratio) else None
         self.db.commit()
 
     def _print_breakdown_analysis(self):

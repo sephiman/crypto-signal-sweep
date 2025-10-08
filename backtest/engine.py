@@ -107,7 +107,8 @@ class BacktestEngine:
             self.timeframe_schedule = self._precompute_timeframe_schedule()
 
             # Walk forward through time
-            logger.warning(f"{worker_prefix}Walking forward from {self.start_date} to {self.end_date}")
+            pair_info = f" ({', '.join(available_pairs)})" if len(available_pairs) <= 3 else f" ({len(available_pairs)} pairs)"
+            logger.warning(f"{worker_prefix}Walking forward from {self.start_date} to {self.end_date}{pair_info}")
             current_time = self.start_date
             start_time = datetime.now()
 
@@ -979,16 +980,18 @@ class BacktestEngine:
         tp1_wins = stats.tp1_wins or 0
         total_pnl = stats.total_pnl or 0.0
 
-        win_rate = (winners / total_trades * 100) if total_trades > 0 else 0.0
+        # Win rate includes both TP2 and TP1 (both are profitable outcomes)
+        total_wins = winners + tp1_wins
+        win_rate = (total_wins / total_trades * 100) if total_trades > 0 else 0.0
         avg_pnl = (total_pnl / total_trades) if total_trades > 0 else 0.0
 
         # Update run record
         run.status = 'completed'
         run.total_trades = total_trades
-        run.total_winners = winners
+        run.total_winners = winners  # TP2 full wins
         run.total_losers = losers
-        run.total_breakeven = tp1_wins
-        run.win_rate = win_rate
+        run.total_tp1_wins = tp1_wins  # TP1 partial wins
+        run.win_rate = win_rate  # Includes both TP2 and TP1
         run.total_pnl = total_pnl
         run.avg_pnl_per_trade = avg_pnl
         run.completed_at = datetime.utcnow()
@@ -1034,11 +1037,17 @@ def run_backtest_worker(worker_id, pair_subset, timeframes, start_date, end_date
     # Run backtest
     engine.run()
 
-    # Store results before cleanup
+    # Store results before cleanup (read signal count from DB, not buffer which is cleared)
+    db = SessionLocal()
+    try:
+        signal_count = db.query(BacktestSignal).filter(BacktestSignal.run_id == engine.run_id).count()
+    finally:
+        db.close()
+
     result = {
         'worker_id': worker_id,
         'pairs': pair_subset,
-        'signal_count': len(engine.signal_buffer),
+        'signal_count': signal_count,
         'run_id': engine.run_id
     }
 
@@ -1112,16 +1121,18 @@ def merge_worker_results(main_run_id, worker_results):
         tp1_wins = stats.tp1_wins or 0
         total_pnl = stats.total_pnl or 0.0
 
-        win_rate = (winners / total_trades * 100) if total_trades > 0 else 0.0
+        # Win rate includes both TP2 and TP1 (both are profitable outcomes)
+        total_wins = winners + tp1_wins
+        win_rate = (total_wins / total_trades * 100) if total_trades > 0 else 0.0
         avg_pnl = (total_pnl / total_trades) if total_trades > 0 else 0.0
 
         # Update main run with final stats
         run.status = 'completed'
         run.total_trades = total_trades
-        run.total_winners = winners
+        run.total_winners = winners  # TP2 full wins
         run.total_losers = losers
-        run.total_breakeven = tp1_wins
-        run.win_rate = win_rate
+        run.total_tp1_wins = tp1_wins  # TP1 partial wins
+        run.win_rate = win_rate  # Includes both TP2 and TP1
         run.total_pnl = total_pnl
         run.avg_pnl_per_trade = avg_pnl
         run.completed_at = datetime.utcnow()
