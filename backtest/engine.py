@@ -920,16 +920,101 @@ class BacktestEngine:
             # Sequential mode: generate timestamp-based run_id
             run_id = int(datetime.utcnow().timestamp())
 
-        # Capture config snapshot
+        # Capture config snapshot - all parameters that affect signal generation
+        from app.config import (
+            RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT, RSI_MOMENTUM,
+            RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT, RSI_TRENDING_MODE,
+            RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
+            MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF, MACD_MIN_DIFF_ENABLED,
+            EMA_FAST, EMA_SLOW, EMA_MIN_DIFF_ENABLED,
+            ATR_PERIOD, STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_OVERSOLD, STOCH_OVERBOUGHT, STOCH_ENABLED,
+            BB_PERIOD, BB_STD_DEV, BB_WIDTH_MIN, BB_ENABLED,
+            ADX_PERIOD, ADX_THRESHOLD, ADX_RSI_MODE,
+            MIN_ATR_RATIO, VOLUME_CONFIRMATION_ENABLED, MIN_VOLUME_RATIO,
+            USE_HIGHER_TF_CONFIRM, USE_TREND_FILTER, TREND_MA_PERIOD, REQUIRED_MA_BARS,
+            SEND_UNCONFIRMED, DYNAMIC_SCORE_ENABLED, MIN_SCORE_DEFAULT,
+            MIN_SCORE_TRENDING, MIN_SCORE_RANGING, TIMEFRAME_MIN_SCORES,
+            TIME_FILTER_ENABLED, TIME_FILTER_TIMEZONE, AVOID_HOURS_START, AVOID_HOURS_END
+        )
+
         config_snapshot = {
+            # Run info
             'pairs': self.pairs,
             'timeframes': self.timeframes,
             'start_date': self.start_date.isoformat(),
             'end_date': self.end_date.isoformat(),
+            'worker_id': self.worker_id if self.is_worker else None,
+
+            # TP/SL settings
+            'atr_period': ATR_PERIOD,
             'atr_sl_multiplier': ATR_SL_MULTIPLIER,
             'atr_tp_multiplier': ATR_TP_MULTIPLIER,
-            'worker_id': self.worker_id if self.is_worker else None,
-            # Add more config as needed
+
+            # RSI settings
+            'rsi_period': RSI_PERIOD,
+            'rsi_oversold': RSI_OVERSOLD,
+            'rsi_overbought': RSI_OVERBOUGHT,
+            'rsi_momentum': RSI_MOMENTUM,
+            'rsi_trending_mode': RSI_TRENDING_MODE,
+            'rsi_trending_oversold': RSI_TRENDING_OVERSOLD,
+            'rsi_trending_overbought': RSI_TRENDING_OVERBOUGHT,
+            'rsi_trending_pullback_long': RSI_TRENDING_PULLBACK_LONG,
+            'rsi_trending_pullback_short': RSI_TRENDING_PULLBACK_SHORT,
+
+            # MACD settings
+            'macd_fast': MACD_FAST,
+            'macd_slow': MACD_SLOW,
+            'macd_signal': MACD_SIGNAL,
+            'macd_min_diff': MACD_MIN_DIFF,
+            'macd_min_diff_enabled': MACD_MIN_DIFF_ENABLED,
+
+            # EMA settings
+            'ema_fast': EMA_FAST,
+            'ema_slow': EMA_SLOW,
+            'ema_min_diff_enabled': EMA_MIN_DIFF_ENABLED,
+
+            # Stochastic settings
+            'stoch_enabled': STOCH_ENABLED,
+            'stoch_k_period': STOCH_K_PERIOD,
+            'stoch_d_period': STOCH_D_PERIOD,
+            'stoch_oversold': STOCH_OVERSOLD,
+            'stoch_overbought': STOCH_OVERBOUGHT,
+
+            # Bollinger Bands settings
+            'bb_enabled': BB_ENABLED,
+            'bb_period': BB_PERIOD,
+            'bb_std_dev': BB_STD_DEV,
+            'bb_width_min': BB_WIDTH_MIN,
+
+            # ADX settings
+            'adx_period': ADX_PERIOD,
+            'adx_threshold': ADX_THRESHOLD,
+            'adx_rsi_mode': ADX_RSI_MODE,
+
+            # Filters
+            'min_atr_ratio': MIN_ATR_RATIO,
+            'volume_confirmation_enabled': VOLUME_CONFIRMATION_ENABLED,
+            'min_volume_ratio': MIN_VOLUME_RATIO,
+
+            # Trend and HTF
+            'use_higher_tf_confirm': USE_HIGHER_TF_CONFIRM,
+            'use_trend_filter': USE_TREND_FILTER,
+            'trend_ma_period': TREND_MA_PERIOD,
+            'required_ma_bars': REQUIRED_MA_BARS,
+
+            # Scoring
+            'send_unconfirmed': SEND_UNCONFIRMED,
+            'dynamic_score_enabled': DYNAMIC_SCORE_ENABLED,
+            'min_score_default': MIN_SCORE_DEFAULT,
+            'min_score_trending': MIN_SCORE_TRENDING,
+            'min_score_ranging': MIN_SCORE_RANGING,
+            'timeframe_min_scores': TIMEFRAME_MIN_SCORES,
+
+            # Time filter
+            'time_filter_enabled': TIME_FILTER_ENABLED,
+            'time_filter_timezone': TIME_FILTER_TIMEZONE,
+            'avoid_hours_start': AVOID_HOURS_START,
+            'avoid_hours_end': AVOID_HOURS_END,
         }
 
         run = BacktestRun(
@@ -1198,14 +1283,79 @@ def run_backtest_parallel():
     timestamp = int(datetime.utcnow().timestamp())
     main_run_id = (timestamp % 20000000) * 100
 
+    # Use same config snapshot as worker mode for consistency
+    from app.config import (
+        RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT, RSI_MOMENTUM,
+        RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT, RSI_TRENDING_MODE,
+        RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
+        MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF, MACD_MIN_DIFF_ENABLED,
+        EMA_FAST, EMA_SLOW, EMA_MIN_DIFF_ENABLED,
+        ATR_PERIOD, STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_OVERSOLD, STOCH_OVERBOUGHT, STOCH_ENABLED,
+        BB_PERIOD, BB_STD_DEV, BB_WIDTH_MIN, BB_ENABLED,
+        ADX_PERIOD, ADX_THRESHOLD, ADX_RSI_MODE,
+        MIN_ATR_RATIO, VOLUME_CONFIRMATION_ENABLED, MIN_VOLUME_RATIO,
+        USE_HIGHER_TF_CONFIRM, USE_TREND_FILTER, TREND_MA_PERIOD, REQUIRED_MA_BARS,
+        SEND_UNCONFIRMED, DYNAMIC_SCORE_ENABLED, MIN_SCORE_DEFAULT,
+        MIN_SCORE_TRENDING, MIN_SCORE_RANGING, TIMEFRAME_MIN_SCORES,
+        TIME_FILTER_ENABLED, TIME_FILTER_TIMEZONE, AVOID_HOURS_START, AVOID_HOURS_END
+    )
+
     config_snapshot = {
         'pairs': PAIRS,
         'timeframes': TIMEFRAMES,
         'start_date': BACKTEST_START_DATE,
         'end_date': BACKTEST_END_DATE,
+        'mode': 'parallel',
         'parallel_workers': n_workers,
+        'atr_period': ATR_PERIOD,
         'atr_sl_multiplier': ATR_SL_MULTIPLIER,
         'atr_tp_multiplier': ATR_TP_MULTIPLIER,
+        'rsi_period': RSI_PERIOD,
+        'rsi_oversold': RSI_OVERSOLD,
+        'rsi_overbought': RSI_OVERBOUGHT,
+        'rsi_momentum': RSI_MOMENTUM,
+        'rsi_trending_mode': RSI_TRENDING_MODE,
+        'rsi_trending_oversold': RSI_TRENDING_OVERSOLD,
+        'rsi_trending_overbought': RSI_TRENDING_OVERBOUGHT,
+        'rsi_trending_pullback_long': RSI_TRENDING_PULLBACK_LONG,
+        'rsi_trending_pullback_short': RSI_TRENDING_PULLBACK_SHORT,
+        'macd_fast': MACD_FAST,
+        'macd_slow': MACD_SLOW,
+        'macd_signal': MACD_SIGNAL,
+        'macd_min_diff': MACD_MIN_DIFF,
+        'macd_min_diff_enabled': MACD_MIN_DIFF_ENABLED,
+        'ema_fast': EMA_FAST,
+        'ema_slow': EMA_SLOW,
+        'ema_min_diff_enabled': EMA_MIN_DIFF_ENABLED,
+        'stoch_enabled': STOCH_ENABLED,
+        'stoch_k_period': STOCH_K_PERIOD,
+        'stoch_d_period': STOCH_D_PERIOD,
+        'stoch_oversold': STOCH_OVERSOLD,
+        'stoch_overbought': STOCH_OVERBOUGHT,
+        'bb_enabled': BB_ENABLED,
+        'bb_period': BB_PERIOD,
+        'bb_std_dev': BB_STD_DEV,
+        'bb_width_min': BB_WIDTH_MIN,
+        'adx_period': ADX_PERIOD,
+        'adx_threshold': ADX_THRESHOLD,
+        'adx_rsi_mode': ADX_RSI_MODE,
+        'min_atr_ratio': MIN_ATR_RATIO,
+        'volume_confirmation_enabled': VOLUME_CONFIRMATION_ENABLED,
+        'min_volume_ratio': MIN_VOLUME_RATIO,
+        'use_higher_tf_confirm': USE_HIGHER_TF_CONFIRM,
+        'use_trend_filter': USE_TREND_FILTER,
+        'trend_ma_period': TREND_MA_PERIOD,
+        'required_ma_bars': REQUIRED_MA_BARS,
+        'send_unconfirmed': SEND_UNCONFIRMED,
+        'dynamic_score_enabled': DYNAMIC_SCORE_ENABLED,
+        'min_score_default': MIN_SCORE_DEFAULT,
+        'min_score_trending': MIN_SCORE_TRENDING,
+        'min_score_ranging': MIN_SCORE_RANGING,
+        'timeframe_min_scores': TIMEFRAME_MIN_SCORES,
+        'time_filter_enabled': TIME_FILTER_ENABLED,
+        'time_filter_timezone': TIME_FILTER_TIMEZONE,
+        'avoid_hours_start': AVOID_HOURS_START,
+        'avoid_hours_end': AVOID_HOURS_END,
     }
 
     run = BacktestRun(
@@ -1257,14 +1407,78 @@ def run_backtest_one_at_a_time():
     timestamp = int(datetime.utcnow().timestamp())
     main_run_id = (timestamp % 20000000) * 100
 
+    # Use same config snapshot as other modes for consistency
+    from app.config import (
+        RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT, RSI_MOMENTUM,
+        RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT, RSI_TRENDING_MODE,
+        RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
+        MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF, MACD_MIN_DIFF_ENABLED,
+        EMA_FAST, EMA_SLOW, EMA_MIN_DIFF_ENABLED,
+        ATR_PERIOD, STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_OVERSOLD, STOCH_OVERBOUGHT, STOCH_ENABLED,
+        BB_PERIOD, BB_STD_DEV, BB_WIDTH_MIN, BB_ENABLED,
+        ADX_PERIOD, ADX_THRESHOLD, ADX_RSI_MODE,
+        MIN_ATR_RATIO, VOLUME_CONFIRMATION_ENABLED, MIN_VOLUME_RATIO,
+        USE_HIGHER_TF_CONFIRM, USE_TREND_FILTER, TREND_MA_PERIOD, REQUIRED_MA_BARS,
+        SEND_UNCONFIRMED, DYNAMIC_SCORE_ENABLED, MIN_SCORE_DEFAULT,
+        MIN_SCORE_TRENDING, MIN_SCORE_RANGING, TIMEFRAME_MIN_SCORES,
+        TIME_FILTER_ENABLED, TIME_FILTER_TIMEZONE, AVOID_HOURS_START, AVOID_HOURS_END
+    )
+
     config_snapshot = {
         'pairs': PAIRS,
         'timeframes': TIMEFRAMES,
         'start_date': BACKTEST_START_DATE,
         'end_date': BACKTEST_END_DATE,
         'mode': 'one_pair_at_a_time',
+        'atr_period': ATR_PERIOD,
         'atr_sl_multiplier': ATR_SL_MULTIPLIER,
         'atr_tp_multiplier': ATR_TP_MULTIPLIER,
+        'rsi_period': RSI_PERIOD,
+        'rsi_oversold': RSI_OVERSOLD,
+        'rsi_overbought': RSI_OVERBOUGHT,
+        'rsi_momentum': RSI_MOMENTUM,
+        'rsi_trending_mode': RSI_TRENDING_MODE,
+        'rsi_trending_oversold': RSI_TRENDING_OVERSOLD,
+        'rsi_trending_overbought': RSI_TRENDING_OVERBOUGHT,
+        'rsi_trending_pullback_long': RSI_TRENDING_PULLBACK_LONG,
+        'rsi_trending_pullback_short': RSI_TRENDING_PULLBACK_SHORT,
+        'macd_fast': MACD_FAST,
+        'macd_slow': MACD_SLOW,
+        'macd_signal': MACD_SIGNAL,
+        'macd_min_diff': MACD_MIN_DIFF,
+        'macd_min_diff_enabled': MACD_MIN_DIFF_ENABLED,
+        'ema_fast': EMA_FAST,
+        'ema_slow': EMA_SLOW,
+        'ema_min_diff_enabled': EMA_MIN_DIFF_ENABLED,
+        'stoch_enabled': STOCH_ENABLED,
+        'stoch_k_period': STOCH_K_PERIOD,
+        'stoch_d_period': STOCH_D_PERIOD,
+        'stoch_oversold': STOCH_OVERSOLD,
+        'stoch_overbought': STOCH_OVERBOUGHT,
+        'bb_enabled': BB_ENABLED,
+        'bb_period': BB_PERIOD,
+        'bb_std_dev': BB_STD_DEV,
+        'bb_width_min': BB_WIDTH_MIN,
+        'adx_period': ADX_PERIOD,
+        'adx_threshold': ADX_THRESHOLD,
+        'adx_rsi_mode': ADX_RSI_MODE,
+        'min_atr_ratio': MIN_ATR_RATIO,
+        'volume_confirmation_enabled': VOLUME_CONFIRMATION_ENABLED,
+        'min_volume_ratio': MIN_VOLUME_RATIO,
+        'use_higher_tf_confirm': USE_HIGHER_TF_CONFIRM,
+        'use_trend_filter': USE_TREND_FILTER,
+        'trend_ma_period': TREND_MA_PERIOD,
+        'required_ma_bars': REQUIRED_MA_BARS,
+        'send_unconfirmed': SEND_UNCONFIRMED,
+        'dynamic_score_enabled': DYNAMIC_SCORE_ENABLED,
+        'min_score_default': MIN_SCORE_DEFAULT,
+        'min_score_trending': MIN_SCORE_TRENDING,
+        'min_score_ranging': MIN_SCORE_RANGING,
+        'timeframe_min_scores': TIMEFRAME_MIN_SCORES,
+        'time_filter_enabled': TIME_FILTER_ENABLED,
+        'time_filter_timezone': TIME_FILTER_TIMEZONE,
+        'avoid_hours_start': AVOID_HOURS_START,
+        'avoid_hours_end': AVOID_HOURS_END,
     }
 
     run = BacktestRun(
