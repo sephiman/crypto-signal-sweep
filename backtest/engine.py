@@ -112,12 +112,15 @@ class BacktestEngine:
             current_time = self.start_date
             start_time = datetime.now()
 
-            total_bars = int((self.end_date - self.start_date).total_seconds() / 60)
+            # Calculate total time span
+            total_seconds = (self.end_date - self.start_date).total_seconds()
             processed_bars = 0
             skipped_bars = 0  # Track skipped timestamps for efficiency reporting
 
             # Pre-calculate log interval (every 1% or min 1000 bars)
-            log_interval = max(1000, total_bars // 100)
+            # Use pre-computed candle close times count for accurate progress
+            total_expected_checks = len(self.candle_close_times)
+            log_interval = max(100, total_expected_checks // 100)
             next_log = log_interval
 
             while current_time <= self.end_date:
@@ -161,7 +164,10 @@ class BacktestEngine:
 
                 # Log progress at intervals
                 if processed_bars >= next_log:
-                    progress = (processed_bars / total_bars) * 100
+                    # Calculate progress based on time elapsed (more accurate than bar count)
+                    time_elapsed_seconds = (current_time - self.start_date).total_seconds()
+                    progress = (time_elapsed_seconds / total_seconds) * 100
+
                     active = len(self.active_signals)
                     completed = len(self.completed_signals)
 
@@ -169,7 +175,7 @@ class BacktestEngine:
                     elapsed = datetime.now() - start_time
                     elapsed_str = str(elapsed).split('.')[0]  # Remove microseconds
 
-                    # Estimate remaining time
+                    # Estimate remaining time based on actual progress
                     if progress > 0:
                         total_estimated = elapsed / (progress / 100)
                         remaining = total_estimated - elapsed
@@ -633,6 +639,13 @@ class BacktestEngine:
             signals = analyze_market(self.pairs, timeframe)
 
             if not signals:
+                # Log when no signals are generated (only first few times per pair to avoid spam)
+                if not hasattr(self, '_no_signal_logged'):
+                    self._no_signal_logged = set()
+                for pair in self.pairs:
+                    if pair not in self._no_signal_logged:
+                        logger.debug(f"🔍 No signals generated for {pair} {timeframe} at {current_time} (will not log again for this pair)")
+                        self._no_signal_logged.add(pair)
                 return
 
             # Store signals and track active ones (batch inserts)
@@ -942,11 +955,20 @@ class BacktestEngine:
         worker_prefix = f"[W{self.worker_id}] " if self.is_worker else ""
 
         # Bulk write all buffered signals at once (PERFORMANCE OPTIMIZATION)
+        # Filter out pending (incomplete) signals - only save completed ones
         if self.signal_buffer:
-            logger.warning(f"{worker_prefix}💾 Writing {len(self.signal_buffer)} signals to database in bulk...")
-            db.add_all(self.signal_buffer)
-            db.commit()
-            logger.warning(f"{worker_prefix}✅ Successfully wrote {len(self.signal_buffer)} signals to database")
+            completed_signals = [sig for sig in self.signal_buffer if sig.hit != 'PENDING']
+            pending_count = len(self.signal_buffer) - len(completed_signals)
+
+            if pending_count > 0:
+                logger.warning(f"{worker_prefix}🗑️  Discarding {pending_count} pending (non-completed) signals")
+
+            if completed_signals:
+                logger.warning(f"{worker_prefix}💾 Writing {len(completed_signals)} completed signals to database in bulk...")
+                db.add_all(completed_signals)
+                db.commit()
+                logger.warning(f"{worker_prefix}✅ Successfully wrote {len(completed_signals)} signals to database")
+
             self.signal_buffer = []  # Clear buffer
 
         # Worker mode: Skip stats calculation (main process will aggregate)
