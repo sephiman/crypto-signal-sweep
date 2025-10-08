@@ -16,13 +16,22 @@ MIN_SCORE_TRENDING = int(os.getenv("MIN_SCORE_TRENDING", 5))
 MIN_SCORE_RANGING = int(os.getenv("MIN_SCORE_RANGING", 5))
 
 # Timeframe-specific minimum score requirements
-TIMEFRAME_MIN_SCORES = {
+_DEFAULT_TIMEFRAME_MIN_SCORES = {
     "1m": 4,
     "5m": 5,
     "15m": 5,
     "1h": 6,
     "4h": 7,
     "1d": 7,
+}
+
+TIMEFRAME_MIN_SCORES = {
+    "1m": int(os.getenv("TIMEFRAME_MIN_SCORES_1M", _DEFAULT_TIMEFRAME_MIN_SCORES["1m"])),
+    "5m": int(os.getenv("TIMEFRAME_MIN_SCORES_5M", _DEFAULT_TIMEFRAME_MIN_SCORES["5m"])),
+    "15m": int(os.getenv("TIMEFRAME_MIN_SCORES_15M", _DEFAULT_TIMEFRAME_MIN_SCORES["15m"])),
+    "1h": int(os.getenv("TIMEFRAME_MIN_SCORES_1H", _DEFAULT_TIMEFRAME_MIN_SCORES["1h"])),
+    "4h": int(os.getenv("TIMEFRAME_MIN_SCORES_4H", _DEFAULT_TIMEFRAME_MIN_SCORES["4h"])),
+    "1d": int(os.getenv("TIMEFRAME_MIN_SCORES_1D", _DEFAULT_TIMEFRAME_MIN_SCORES["1d"])),
 }
 MIN_ATR_RATIO = float(os.getenv("MIN_ATR_RATIO", 0.005))
 

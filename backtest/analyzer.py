@@ -31,12 +31,9 @@ class BacktestAnalyzer:
         self.run = None
         self.signals = []
 
-    def analyze(self, output_csv: bool = True):
+    def analyze(self):
         """
         Perform full analysis and generate reports.
-
-        Args:
-            output_csv: Whether to export results to CSV
         """
         # Load backtest run and signals
         self._load_data()
@@ -53,10 +50,6 @@ class BacktestAnalyzer:
 
         # Print config
         self._print_config()
-
-        # Export to CSV if requested
-        if output_csv:
-            self._export_to_csv()
 
         self.db.close()
 
@@ -235,46 +228,6 @@ class BacktestAnalyzer:
         for attr in config_attrs[:30]:  # Print first 30 config items
             value = getattr(config, attr)
             logger.info(f"{attr}: {value}")
-
-    def _export_to_csv(self):
-        """Export backtest results to CSV"""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"backtest_results_{self.run_id}_{timestamp}.csv"
-
-        # Create DataFrame with all signal details
-        data = []
-        for s in self.signals:
-            data.append({
-                'run_id': s.run_id,
-                'signal_uuid': s.signal_uuid,
-                'pair': s.pair,
-                'timeframe': s.timeframe,
-                'side': s.side,
-                'timestamp': s.timestamp,
-                'price': s.price,
-                'stop_loss': s.stop_loss,
-                'take_profit_1': s.take_profit_1,
-                'take_profit_2': s.take_profit_2,
-                'hit': s.hit,
-                'hit_timestamp': s.hit_timestamp,
-                'hit_price': s.hit_price,
-                'pnl_percent': s.pnl_percent,
-                'sl_moved_to_be': s.sl_moved_to_be,
-                'score': s.score,
-                'required_score': s.required_score,
-                'rsi': s.rsi,
-                'adx': s.adx,
-                'macd_diff': s.macd_diff,
-                'regime': s.regime,
-                'confidence': s.confidence,
-                'volume_ratio': s.volume_ratio
-            })
-
-        df = pd.DataFrame(data)
-        df.to_csv(filename, index=False)
-
-        logger.info(f"\n--- CSV EXPORT ---")
-        logger.info(f"Results exported to: {filename}")
 
 
 def analyze_backtest(run_id: Optional[int] = None):
