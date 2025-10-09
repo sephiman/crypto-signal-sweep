@@ -471,6 +471,83 @@ def summarize_and_notify() -> Optional[str]:
     # Add legend at the end
     lines.append("*Legend:* W=Win(TP2) BE=Breakeven(TP1) L=Loss")
 
+    # Add configuration snapshot
+    lines.append("")
+    lines.append("*CONFIGURATION SNAPSHOT*")
+
+    # Import config values
+    from app.config import (
+        PAIRS, TIMEFRAMES,
+        RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT, RSI_MOMENTUM,
+        RSI_TRENDING_MODE, RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT,
+        RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
+        MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF, MACD_MIN_DIFF_ENABLED,
+        EMA_FAST, EMA_SLOW, EMA_MIN_DIFF_ENABLED,
+        ATR_PERIOD, ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER,
+        STOCH_ENABLED, STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_OVERSOLD, STOCH_OVERBOUGHT,
+        BB_ENABLED, BB_PERIOD, BB_STD_DEV, BB_WIDTH_MIN,
+        ADX_PERIOD, ADX_THRESHOLD, ADX_RSI_MODE,
+        MIN_ATR_RATIO, VOLUME_CONFIRMATION_ENABLED, MIN_VOLUME_RATIO,
+        USE_HIGHER_TF_CONFIRM, USE_TREND_FILTER, TREND_MA_PERIOD, REQUIRED_MA_BARS,
+        SEND_UNCONFIRMED, DYNAMIC_SCORE_ENABLED,
+        MIN_SCORE_DEFAULT, MIN_SCORE_TRENDING, MIN_SCORE_RANGING, TIMEFRAME_MIN_SCORES,
+        TIME_FILTER_ENABLED, TIME_FILTER_TIMEZONE, AVOID_HOURS_START, AVOID_HOURS_END
+    )
+
+    # TP/SL Settings
+    lines.append(f"TP/SL: ATR_PERIOD={ATR_PERIOD}, SL={ATR_SL_MULTIPLIER}x, TP={ATR_TP_MULTIPLIER}x")
+
+    # RSI Settings
+    lines.append(f"RSI: PERIOD={RSI_PERIOD}, OS={RSI_OVERSOLD}, OB={RSI_OVERBOUGHT}, MOMENTUM={RSI_MOMENTUM}")
+    if ADX_RSI_MODE == "adx":
+        lines.append(f"RSI_TREND: MODE={RSI_TRENDING_MODE}, OS={RSI_TRENDING_OVERSOLD}, OB={RSI_TRENDING_OVERBOUGHT}")
+        if RSI_TRENDING_MODE == "pullback":
+            lines.append(f"RSI_PULLBACK: LONG>{RSI_TRENDING_PULLBACK_LONG}, SHORT<{RSI_TRENDING_PULLBACK_SHORT}")
+
+    # MACD Settings
+    macd_diff_str = f", MIN_DIFF={MACD_MIN_DIFF}" if MACD_MIN_DIFF_ENABLED else ""
+    lines.append(f"MACD: {MACD_FAST}/{MACD_SLOW}/{MACD_SIGNAL}{macd_diff_str}")
+
+    # EMA Settings
+    ema_diff_str = " (diff enabled)" if EMA_MIN_DIFF_ENABLED else ""
+    lines.append(f"EMA: {EMA_FAST}/{EMA_SLOW}{ema_diff_str}")
+
+    # Stochastic
+    if STOCH_ENABLED:
+        lines.append(f"STOCH: K={STOCH_K_PERIOD}, D={STOCH_D_PERIOD}, OS={STOCH_OVERSOLD}, OB={STOCH_OVERBOUGHT}")
+
+    # Bollinger Bands
+    if BB_ENABLED:
+        lines.append(f"BB: PERIOD={BB_PERIOD}, STD={BB_STD_DEV}, MIN_WIDTH={BB_WIDTH_MIN}")
+
+    # ADX Settings
+    lines.append(f"ADX: PERIOD={ADX_PERIOD}, THRESHOLD={ADX_THRESHOLD}, MODE={ADX_RSI_MODE}")
+
+    # Filters
+    filters = []
+    if USE_HIGHER_TF_CONFIRM:
+        filters.append("HTF")
+    if USE_TREND_FILTER:
+        filters.append(f"TREND(MA{TREND_MA_PERIOD})")
+    if VOLUME_CONFIRMATION_ENABLED:
+        filters.append(f"VOL>{MIN_VOLUME_RATIO}")
+    filters.append(f"ATR>{MIN_ATR_RATIO}")
+    if TIME_FILTER_ENABLED:
+        filters.append(f"TIME({TIME_FILTER_TIMEZONE}:{AVOID_HOURS_START}-{AVOID_HOURS_END})")
+    lines.append(f"FILTERS: {', '.join(filters)}")
+
+    # Scoring
+    if DYNAMIC_SCORE_ENABLED:
+        lines.append(f"SCORING: DEFAULT={MIN_SCORE_DEFAULT}, TREND={MIN_SCORE_TRENDING}, RANGE={MIN_SCORE_RANGING}")
+        tf_scores = ", ".join([f"{tf}={score}" for tf, score in TIMEFRAME_MIN_SCORES.items() if tf in TIMEFRAMES])
+        lines.append(f"TF_SCORES: {tf_scores}")
+    else:
+        lines.append(f"SCORING: FIXED={MIN_SCORE_DEFAULT}")
+
+    # Pairs and Timeframes
+    lines.append(f"PAIRS: {', '.join(PAIRS)}")
+    lines.append(f"TIMEFRAMES: {', '.join(TIMEFRAMES)}")
+
     summary = "\n".join(lines)
     logger.info(f"Trading performance summary:\n{summary}")
     return summary
