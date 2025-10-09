@@ -226,6 +226,7 @@ def _get_volume_ratio(data):
 def _get_htf_confirmation(pair, higher_tf):
     """
     Higher timeframe confirmation (LIVE mode only).
+    Calculates indicators from live data, then delegates to shared business logic.
 
     NOTE: In backtest mode, this function is NOT called.
     Use get_htf_confirmation_from_cache() from backtest_cache module instead.
@@ -233,13 +234,12 @@ def _get_htf_confirmation(pair, higher_tf):
     Args:
         pair: Trading pair
         higher_tf: Higher timeframe to check
-        htf_indicators_cache: Deprecated parameter (not used)
 
     Returns:
         Tuple of (confirm_long, confirm_short)
     """
     try:
-        # Live calculation only
+        # MODE-SPECIFIC: Fetch live data and calculate indicators
         hdf = fetch_ohlcv_df([pair], higher_tf).get(pair)
         if hdf is None or len(hdf) < 30:
             return True, True
@@ -254,11 +254,8 @@ def _get_htf_confirmation(pair, higher_tf):
         ht_macd = ht_macd_obj.macd().iloc[-1]
         ht_signal = ht_macd_obj.macd_signal().iloc[-1]
 
-        # HTF confirmation
-        confirm_long = ht_rsi > 45 and ht_macd > ht_signal and (ht_macd - ht_signal) > 0.5
-        confirm_short = ht_rsi < 55 and ht_macd < ht_signal and (ht_signal - ht_macd) > 0.5
-
-        return confirm_long, confirm_short
+        # SHARED: Delegate to shared business logic evaluator
+        return _evaluate_htf_confirmation(ht_rsi, ht_macd, ht_signal)
     except Exception as e:
         logger.debug(f"HTF confirmation failed for {pair} {higher_tf}: {e}")
         return True, True  # Default to allowing signals if HTF fails
@@ -362,26 +359,45 @@ def _calculate_technical_indicators(data, price):
                                atr, atr_pct, adx, stoch_k, stoch_d, volume_ratio, bb_width, bb_width_prev)
 
 
-def _calculate_market_conditions(data, indicators, timeframe, pair):
-    """
-    Calculate all market conditions and filters (LIVE mode only).
+# ============================================================================
+# SHARED BUSINESS LOGIC FUNCTIONS
+# These pure functions contain the business rules used by both LIVE and BACKTEST modes
+# ============================================================================
 
-    NOTE: In backtest mode, this function is NOT called.
-    Use get_conditions_from_cache() from backtest_cache module instead.
+def _evaluate_volume_and_atr(indicators, timeframe):
+    """
+    Evaluate volume and ATR filter conditions.
+    Pure business logic - no mode-specific code.
 
     Args:
-        data: OHLCV DataFrame
         indicators: TechnicalIndicators object
         timeframe: Trading timeframe
-        pair: Trading pair
-        sma_cache: Deprecated parameter (not used)
-    """
-    volume_pass = not VOLUME_CONFIRMATION_ENABLED or _check_volume_confirmation(data, timeframe)
-    atr_pass = indicators.atr_pct >= MIN_ATR_RATIO
 
+    Returns:
+        Tuple of (volume_pass, atr_pass, min_ema_separation)
+    """
+    from app.config import VOLUME_CONFIRMATION_ENABLED, MIN_ATR_RATIO, get_volume_ratio_for_timeframe
+
+    volume_pass = not VOLUME_CONFIRMATION_ENABLED or indicators.volume_ratio >= (get_volume_ratio_for_timeframe(timeframe) - 0.01)
+    atr_pass = indicators.atr_pct >= MIN_ATR_RATIO
     min_ema_separation = indicators.atr * 0.5
 
-    # MACD momentum check
+    return volume_pass, atr_pass, min_ema_separation
+
+
+def _evaluate_macd_momentum(indicators):
+    """
+    Evaluate MACD momentum conditions for long and short.
+    Pure business logic - no mode-specific code.
+
+    Args:
+        indicators: TechnicalIndicators object
+
+    Returns:
+        Tuple of (momentum_ok_long, momentum_ok_short)
+    """
+    from app.config import MACD_MIN_DIFF_ENABLED, MACD_MIN_DIFF
+
     if MACD_MIN_DIFF_ENABLED:
         momentum_ok_long = (indicators.macd > indicators.signal_line) and (indicators.diff >= MACD_MIN_DIFF)
         momentum_ok_short = (indicators.macd < indicators.signal_line) and (indicators.diff <= -MACD_MIN_DIFF)
@@ -389,7 +405,23 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
         momentum_ok_long = indicators.macd > indicators.signal_line
         momentum_ok_short = indicators.macd < indicators.signal_line
 
-    # EMA check
+    return momentum_ok_long, momentum_ok_short
+
+
+def _evaluate_ema_conditions(indicators, min_ema_separation):
+    """
+    Evaluate EMA separation conditions for long and short.
+    Pure business logic - no mode-specific code.
+
+    Args:
+        indicators: TechnicalIndicators object
+        min_ema_separation: Minimum EMA separation threshold
+
+    Returns:
+        Tuple of (ema_ok_long, ema_ok_short)
+    """
+    from app.config import EMA_MIN_DIFF_ENABLED
+
     if EMA_MIN_DIFF_ENABLED:
         ema_separation = abs(indicators.ema_fast - indicators.ema_slow)
         ema_ok_long = (indicators.ema_fast > indicators.ema_slow) and (ema_separation >= min_ema_separation)
@@ -398,9 +430,31 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
         ema_ok_long = indicators.ema_fast > indicators.ema_slow
         ema_ok_short = indicators.ema_fast < indicators.ema_slow
 
-    # RSI regime logic
+    return ema_ok_long, ema_ok_short
+
+
+def _evaluate_rsi_regime(indicators, timeframe):
+    """
+    Evaluate RSI conditions based on market regime (trending vs ranging).
+    Pure business logic - no mode-specific code.
+
+    Args:
+        indicators: TechnicalIndicators object
+        timeframe: Trading timeframe
+
+    Returns:
+        Tuple of (rsi_ok_long, rsi_ok_short, is_trending)
+    """
+    from app.config import (
+        ADX_RSI_MODE, RSI_OVERSOLD, RSI_OVERBOUGHT, RSI_MOMENTUM,
+        RSI_TRENDING_MODE, RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
+        RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT,
+        get_adx_threshold_for_timeframe
+    )
+
     adx_threshold = get_adx_threshold_for_timeframe(timeframe)
     is_trending = indicators.adx >= adx_threshold
+
     if ADX_RSI_MODE == "rsi":
         # Simple mode: always use standard oversold/overbought levels
         rsi_ok_long = indicators.rsi < RSI_OVERSOLD
@@ -422,7 +476,127 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
             rsi_ok_long = indicators.rsi < RSI_OVERSOLD
             rsi_ok_short = indicators.rsi > RSI_OVERBOUGHT
 
-    # Trend filter logic (live calculation only)
+    return rsi_ok_long, rsi_ok_short, is_trending
+
+
+def _evaluate_stochastic(indicators):
+    """
+    Evaluate Stochastic oscillator conditions.
+    Pure business logic - no mode-specific code.
+
+    Args:
+        indicators: TechnicalIndicators object
+
+    Returns:
+        Tuple of (stoch_ok_long, stoch_ok_short)
+    """
+    from app.config import STOCH_ENABLED, STOCH_OVERSOLD, STOCH_OVERBOUGHT
+
+    if STOCH_ENABLED:
+        stoch_ok_long = indicators.stoch_k < STOCH_OVERSOLD and indicators.stoch_d < STOCH_OVERSOLD
+        stoch_ok_short = indicators.stoch_k > STOCH_OVERBOUGHT and indicators.stoch_d > STOCH_OVERBOUGHT
+    else:
+        stoch_ok_long = stoch_ok_short = True  # Allow signals when disabled
+
+    return stoch_ok_long, stoch_ok_short
+
+
+def _evaluate_bb_conditions(indicators):
+    """
+    Evaluate Bollinger Bands width and expansion conditions.
+    Pure business logic - no mode-specific code.
+
+    Args:
+        indicators: TechnicalIndicators object
+
+    Returns:
+        bool: True if BB conditions pass
+    """
+    from app.config import BB_ENABLED, BB_WIDTH_MIN
+
+    if BB_ENABLED:
+        # Check if BB width is expanding (current > previous) AND above minimum threshold
+        bb_expanding = indicators.bb_width > indicators.bb_width_prev
+        bb_above_min = indicators.bb_width >= BB_WIDTH_MIN
+        bb_pass = bb_expanding and bb_above_min
+    else:
+        bb_pass = True  # Allow signals when disabled
+
+    return bb_pass
+
+
+def _evaluate_htf_confirmation(ht_rsi, ht_macd, ht_signal):
+    """
+    Evaluate higher timeframe confirmation logic.
+    Pure business logic - no mode-specific code.
+
+    Args:
+        ht_rsi: Higher timeframe RSI value
+        ht_macd: Higher timeframe MACD value
+        ht_signal: Higher timeframe MACD signal value
+
+    Returns:
+        Tuple of (confirm_long, confirm_short)
+    """
+    confirm_long = ht_rsi > 45 and ht_macd > ht_signal and (ht_macd - ht_signal) > 0.5
+    confirm_short = ht_rsi < 55 and ht_macd < ht_signal and (ht_signal - ht_macd) > 0.5
+
+    return confirm_long, confirm_short
+
+
+def _evaluate_market_conditions(indicators, timeframe, trend_ok_long, trend_ok_short,
+                                 confirm_long, confirm_short):
+    """
+    Main orchestrator for evaluating all market conditions.
+    Pure business logic - delegates to specialized evaluation functions.
+
+    Args:
+        indicators: TechnicalIndicators object
+        timeframe: Trading timeframe
+        trend_ok_long: Trend filter result for long (from caller)
+        trend_ok_short: Trend filter result for short (from caller)
+        confirm_long: HTF confirmation for long (from caller)
+        confirm_short: HTF confirmation for short (from caller)
+
+    Returns:
+        MarketConditions object
+    """
+    # Evaluate all conditions using shared business logic
+    volume_pass, atr_pass, min_ema_separation = _evaluate_volume_and_atr(indicators, timeframe)
+    momentum_ok_long, momentum_ok_short = _evaluate_macd_momentum(indicators)
+    ema_ok_long, ema_ok_short = _evaluate_ema_conditions(indicators, min_ema_separation)
+    rsi_ok_long, rsi_ok_short, is_trending = _evaluate_rsi_regime(indicators, timeframe)
+    stoch_ok_long, stoch_ok_short = _evaluate_stochastic(indicators)
+    bb_pass = _evaluate_bb_conditions(indicators)
+
+    return MarketConditions(
+        rsi_ok_long, rsi_ok_short, momentum_ok_long, momentum_ok_short,
+        ema_ok_long, ema_ok_short, trend_ok_long, trend_ok_short,
+        stoch_ok_long, stoch_ok_short, confirm_long, confirm_short,
+        volume_pass, atr_pass, is_trending, bb_pass
+    )
+
+
+# ============================================================================
+# MODE-SPECIFIC HELPER FUNCTIONS
+# These functions handle data fetching/calculation (live) or cache lookup (backtest)
+# ============================================================================
+
+def _calculate_market_conditions(data, indicators, timeframe, pair):
+    """
+    Calculate all market conditions and filters (LIVE mode only).
+    Handles mode-specific data fetching, then delegates to shared business logic.
+
+    NOTE: In backtest mode, this function is NOT called.
+    Use get_conditions_from_cache() from backtest_cache module instead.
+
+    Args:
+        data: OHLCV DataFrame
+        indicators: TechnicalIndicators object
+        timeframe: Trading timeframe
+        pair: Trading pair
+    """
+    # MODE-SPECIFIC: Calculate trend filter from live data
     if USE_TREND_FILTER:
         sma = data['close'].rolling(window=TREND_MA_PERIOD).mean()
         recent_closes = data['close'].iloc[-REQUIRED_MA_BARS:]
@@ -432,14 +606,7 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
     else:
         trend_ok_long = trend_ok_short = True
 
-    # Stochastic conditions
-    if STOCH_ENABLED:
-        stoch_ok_long = indicators.stoch_k < STOCH_OVERSOLD and indicators.stoch_d < STOCH_OVERSOLD
-        stoch_ok_short = indicators.stoch_k > STOCH_OVERBOUGHT and indicators.stoch_d > STOCH_OVERBOUGHT
-    else:
-        stoch_ok_long = stoch_ok_short = True  # Allow signals when disabled
-
-    # Higher timeframe confirmation (live calculation only)
+    # MODE-SPECIFIC: Get higher timeframe confirmation from live calculation
     if USE_HIGHER_TF_CONFIRM:
         higher_tf = HIGHER_TF_MAP.get(timeframe)
         if higher_tf:
@@ -449,19 +616,9 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
     else:
         confirm_long = confirm_short = True
 
-    # Bollinger Bands Width filter
-    if BB_ENABLED:
-        # Check if BB width is expanding (current > previous) AND above minimum threshold
-        bb_expanding = indicators.bb_width > indicators.bb_width_prev
-        bb_above_min = indicators.bb_width >= BB_WIDTH_MIN
-        bb_pass = bb_expanding and bb_above_min
-    else:
-        bb_pass = True  # Allow signals when disabled
-
-    return MarketConditions(rsi_ok_long, rsi_ok_short, momentum_ok_long, momentum_ok_short,
-                            ema_ok_long, ema_ok_short, trend_ok_long, trend_ok_short,
-                            stoch_ok_long, stoch_ok_short, confirm_long, confirm_short,
-                            volume_pass, atr_pass, is_trending, bb_pass)
+    # SHARED: Delegate to shared business logic evaluator
+    return _evaluate_market_conditions(indicators, timeframe, trend_ok_long, trend_ok_short,
+                                       confirm_long, confirm_short)
 
 
 def _calculate_scores(indicators, conditions, timeframe):
