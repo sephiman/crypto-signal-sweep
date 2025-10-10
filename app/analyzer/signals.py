@@ -463,8 +463,10 @@ def _evaluate_rsi_regime(indicators, timeframe):
             # Market is trending - use trending-specific RSI strategy
             if RSI_TRENDING_MODE == "pullback":
                 # Pullback mode: Look for mild retracements in strong trends
-                rsi_ok_long = RSI_TRENDING_PULLBACK_LONG < indicators.rsi < RSI_MOMENTUM
-                rsi_ok_short = RSI_MOMENTUM < indicators.rsi < RSI_TRENDING_PULLBACK_SHORT
+                # LONG: Buy pullbacks in uptrends (RSI drops from overbought to 50-60)
+                # SHORT: Sell pullbacks in downtrends (RSI rises from oversold to 40-50)
+                rsi_ok_long = RSI_MOMENTUM < indicators.rsi < RSI_TRENDING_PULLBACK_SHORT
+                rsi_ok_short = RSI_TRENDING_PULLBACK_LONG < indicators.rsi < RSI_MOMENTUM
             else:
                 # Extreme mode (default): Require even more extreme levels in trends
                 rsi_ok_long = indicators.rsi < RSI_TRENDING_OVERSOLD
