@@ -59,7 +59,7 @@ RSI_TRENDING_PULLBACK_SHORT = float(os.getenv("RSI_TRENDING_PULLBACK_SHORT", 60)
 MACD_FAST = int(os.getenv("MACD_FAST", 12))
 MACD_SLOW = int(os.getenv("MACD_SLOW", 26))
 MACD_SIGNAL = int(os.getenv("MACD_SIGNAL", 9))
-MACD_MIN_DIFF = float(os.getenv("MACD_MIN_DIFF", 0.8))
+MACD_MIN_DIFF_PCT = float(os.getenv("MACD_MIN_DIFF_PCT", 0.0002))
 MACD_MIN_DIFF_ENABLED = os.getenv("MACD_MIN_DIFF_ENABLED", "true").lower() == "true"
 
 EMA_FAST = int(os.getenv("EMA_FAST", 9))

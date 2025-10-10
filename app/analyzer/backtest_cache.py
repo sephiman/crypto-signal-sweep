@@ -7,7 +7,7 @@ functions keeps signals.py focused on core analysis logic.
 """
 
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 import pandas as pd
 
@@ -61,7 +61,7 @@ def get_indicators_from_cache(candle_ts, prev_candle_ts, indicators_cache, price
 
 
 def get_conditions_from_cache(data, indicators: TechnicalIndicators, timeframe: str,
-                               sma_cache: Dict, htf_cache: Dict) -> MarketConditions:
+                               sma_cache: Dict, htf_cache: Dict, price: float) -> MarketConditions:
     """
     Calculate market conditions using pre-calculated caches (backtest mode only).
     Handles mode-specific cache lookups, then delegates to shared business logic.
@@ -72,6 +72,7 @@ def get_conditions_from_cache(data, indicators: TechnicalIndicators, timeframe: 
         timeframe: Trading timeframe
         sma_cache: Pre-calculated SMA dict
         htf_cache: Pre-calculated HTF indicators dict (pair_cache)
+        price: Current price
 
     Returns:
         MarketConditions object
@@ -105,7 +106,7 @@ def get_conditions_from_cache(data, indicators: TechnicalIndicators, timeframe: 
 
     # SHARED: Delegate to shared business logic evaluator
     return _evaluate_market_conditions(indicators, timeframe, trend_ok_long, trend_ok_short,
-                                       confirm_long, confirm_short)
+                                       confirm_long, confirm_short, price)
 
 
 def get_htf_confirmation_from_cache(data: pd.DataFrame, higher_tf: str,

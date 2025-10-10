@@ -2,22 +2,24 @@
 Backtesting engine that simulates trading with historical data.
 Uses 1m precision for TP/SL simulation and aggregated timeframes for signal generation.
 """
-import logging
-import json
-import pandas as pd
 import bisect
+import json
+import logging
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
 from typing import List, Dict
-from app.db.models import HistoricalOHLCV, BacktestSignal, BacktestRun
-from app.db.database import SessionLocal
+
+import pandas as pd
+from sqlalchemy import and_
+from sqlalchemy.orm import Session
+
 from app.analyzer.signals import analyze_market
-from app.data_provider import set_backtest_data, set_backtest_timestamp
 from app.config import (
     BACKTEST_START_DATE, BACKTEST_END_DATE, PAIRS, TIMEFRAMES,
     ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER
 )
+from app.data_provider import set_backtest_data, set_backtest_timestamp
+from app.db.database import SessionLocal
+from app.db.models import HistoricalOHLCV, BacktestSignal, BacktestRun
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +109,8 @@ class BacktestEngine:
             self.timeframe_schedule = self._precompute_timeframe_schedule()
 
             # Walk forward through time
-            pair_info = f" ({', '.join(available_pairs)})" if len(available_pairs) <= 3 else f" ({len(available_pairs)} pairs)"
+            pair_info = f" ({', '.join(available_pairs)})" if len(
+                available_pairs) <= 3 else f" ({len(available_pairs)} pairs)"
             logger.warning(f"{worker_prefix}Walking forward from {self.start_date} to {self.end_date}{pair_info}")
             current_time = self.start_date
             start_time = datetime.now()
@@ -191,7 +194,8 @@ class BacktestEngine:
                     # Add worker ID prefix if in worker mode
                     worker_prefix = f"[W{self.worker_id}] " if self.is_worker else ""
 
-                    logger.warning(f"{worker_prefix}PROGRESS: {current_time.strftime('%Y-%m-%d')} | {progress:.1f}% | Elapsed: {elapsed_str}{eta_str} | Skipped: {skip_efficiency:.1f}% | Total: {active + completed} (Active: {active}, Completed: {completed})")
+                    logger.warning(
+                        f"{worker_prefix}PROGRESS: {current_time.strftime('%Y-%m-%d')} | {progress:.1f}% | Elapsed: {elapsed_str}{eta_str} | Skipped: {skip_efficiency:.1f}% | Total: {active + completed} (Active: {active}, Completed: {completed})")
                     next_log += log_interval
 
             # Final commit for any pending updates
@@ -208,7 +212,8 @@ class BacktestEngine:
             total_checked = processed_bars + skipped_bars
             skip_efficiency = (skipped_bars / total_checked * 100) if total_checked > 0 else 0
             logger.warning(f"{worker_prefix}Backtest run {self.run_id} completed in {total_elapsed_str}")
-            logger.warning(f"{worker_prefix}Performance: Processed {processed_bars:,} timestamps, Skipped {skipped_bars:,} ({skip_efficiency:.1f}% efficiency)")
+            logger.warning(
+                f"{worker_prefix}Performance: Processed {processed_bars:,} timestamps, Skipped {skipped_bars:,} ({skip_efficiency:.1f}% efficiency)")
 
         except Exception as e:
             logger.error(f"Backtest failed: {e}")
@@ -223,9 +228,7 @@ class BacktestEngine:
         Load all historical data and pre-compute timeframes with HTF indicators.
         Returns: {pair: {'1m_indexed': {ts: candle}, '1m': df, '15m': df, '15m_indicators': {...}, ...}}
         """
-        from ta.momentum import RSIIndicator
-        from ta.trend import MACD
-        from app.config import RSI_PERIOD, MACD_FAST, MACD_SLOW, MACD_SIGNAL, HIGHER_TF_MAP, USE_HIGHER_TF_CONFIRM
+        from app.config import HIGHER_TF_MAP, USE_HIGHER_TF_CONFIRM
 
         data_cache = {}
 
@@ -644,7 +647,8 @@ class BacktestEngine:
                     self._no_signal_logged = set()
                 for pair in self.pairs:
                     if pair not in self._no_signal_logged:
-                        logger.debug(f"🔍 No signals generated for {pair} {timeframe} at {current_time} (will not log again for this pair)")
+                        logger.debug(
+                            f"🔍 No signals generated for {pair} {timeframe} at {current_time} (will not log again for this pair)")
                         self._no_signal_logged.add(pair)
                 return
 
@@ -654,7 +658,8 @@ class BacktestEngine:
             for signal in signals:
                 # Log first signal generation
                 if not self.first_signal_logged:
-                    logger.debug(f"🎯 First signal generated: {signal['pair']} {timeframe} {signal['side']} at {current_time}")
+                    logger.debug(
+                        f"🎯 First signal generated: {signal['pair']} {timeframe} {signal['side']} at {current_time}")
                     self.first_signal_logged = True
 
                 # Skip if we already have an active signal for this pair/timeframe
@@ -748,12 +753,14 @@ class BacktestEngine:
                     'next_check_time': next_check,
                     'atr': atr  # Store for recalculation after TP1
                 }
-                logger.info(f"Added active signal: {key} - {signal['side']} at {signal['price']}, SL:{signal['stop_loss']}, TP1:{signal['take_profit_1']}, TP2:{signal['take_profit_2']}")
+                logger.info(
+                    f"Added active signal: {key} - {signal['side']} at {signal['price']}, SL:{signal['stop_loss']}, TP1:{signal['take_profit_1']}, TP2:{signal['take_profit_2']}")
 
             # Buffer signals for bulk write at end (performance optimization)
             if new_signal_records:
                 self.signal_buffer.extend(new_signal_records)
-                logger.info(f"Buffered {len(new_signal_records)} signals. Active signals: {len(self.active_signals)}, Total buffered: {len(self.signal_buffer)}")
+                logger.info(
+                    f"Buffered {len(new_signal_records)} signals. Active signals: {len(self.active_signals)}, Total buffered: {len(self.signal_buffer)}")
 
         except Exception as e:
             logger.error(f"Error generating signals for {timeframe} at {current_time}: {e}")
@@ -809,7 +816,8 @@ class BacktestEngine:
                     skip_candles = self._estimate_min_candles_to_target(entry, targets, signal_data['atr'])
                     signal_data['next_check_time'] = current_time + timedelta(minutes=skip_candles)
 
-                    logger.info(f"🎯 {pair} LONG: TP1 hit at {current_time}, SL moved to BE, next check in {skip_candles}m")
+                    logger.info(
+                        f"🎯 {pair} LONG: TP1 hit at {current_time}, SL moved to BE, next check in {skip_candles}m")
                     continue
 
                 # If TP1 was hit, check for TP2 or BE
@@ -833,7 +841,8 @@ class BacktestEngine:
                         record.pnl_percent = signal_data['pnl_tp1']  # Use pre-calculated value
                         keys_to_remove.append(key)
                         self.completed_signals.append(record)
-                        logger.info(f"🎯 {pair} LONG: TP1 secured (closed at BE) at {current_time}, PnL: {record.pnl_percent:.2f}%")
+                        logger.info(
+                            f"🎯 {pair} LONG: TP1 secured (closed at BE) at {current_time}, PnL: {record.pnl_percent:.2f}%")
                 else:
                     # TP1 not hit yet, check original SL
                     if low <= sl:
@@ -860,7 +869,8 @@ class BacktestEngine:
                     skip_candles = self._estimate_min_candles_to_target(entry, targets, signal_data['atr'])
                     signal_data['next_check_time'] = current_time + timedelta(minutes=skip_candles)
 
-                    logger.info(f"🎯 {pair} SHORT: TP1 hit at {current_time}, SL moved to BE, next check in {skip_candles}m")
+                    logger.info(
+                        f"🎯 {pair} SHORT: TP1 hit at {current_time}, SL moved to BE, next check in {skip_candles}m")
                     continue
 
                 # If TP1 was hit, check for TP2 or BE
@@ -884,7 +894,8 @@ class BacktestEngine:
                         record.pnl_percent = signal_data['pnl_tp1']  # Use pre-calculated value
                         keys_to_remove.append(key)
                         self.completed_signals.append(record)
-                        logger.info(f"🎯 {pair} SHORT: TP1 secured (closed at BE) at {current_time}, PnL: {record.pnl_percent:.2f}%")
+                        logger.info(
+                            f"🎯 {pair} SHORT: TP1 secured (closed at BE) at {current_time}, PnL: {record.pnl_percent:.2f}%")
                 else:
                     # TP1 not hit yet, check original SL
                     if high >= sl:
@@ -925,7 +936,7 @@ class BacktestEngine:
             RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT, RSI_MOMENTUM,
             RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT, RSI_TRENDING_MODE,
             RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
-            MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF, MACD_MIN_DIFF_ENABLED,
+            MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF_PCT, MACD_MIN_DIFF_ENABLED,
             EMA_FAST, EMA_SLOW, EMA_MIN_DIFF_ENABLED,
             ATR_PERIOD, STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_OVERSOLD, STOCH_OVERBOUGHT, STOCH_ENABLED,
             BB_PERIOD, BB_STD_DEV, BB_WIDTH_MIN, BB_ENABLED,
@@ -965,7 +976,7 @@ class BacktestEngine:
             'macd_fast': MACD_FAST,
             'macd_slow': MACD_SLOW,
             'macd_signal': MACD_SIGNAL,
-            'macd_min_diff': MACD_MIN_DIFF,
+            'macd_min_diff_pct': MACD_MIN_DIFF_PCT,
             'macd_min_diff_enabled': MACD_MIN_DIFF_ENABLED,
 
             # EMA settings
@@ -1049,7 +1060,8 @@ class BacktestEngine:
                 logger.warning(f"{worker_prefix}🗑️  Discarding {pending_count} pending (non-completed) signals")
 
             if completed_signals:
-                logger.warning(f"{worker_prefix}💾 Writing {len(completed_signals)} completed signals to database in bulk...")
+                logger.warning(
+                    f"{worker_prefix}💾 Writing {len(completed_signals)} completed signals to database in bulk...")
                 db.add_all(completed_signals)
                 db.commit()
                 logger.warning(f"{worker_prefix}✅ Successfully wrote {len(completed_signals)} signals to database")
@@ -1288,7 +1300,7 @@ def run_backtest_parallel():
         RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT, RSI_MOMENTUM,
         RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT, RSI_TRENDING_MODE,
         RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
-        MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF, MACD_MIN_DIFF_ENABLED,
+        MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF_PCT, MACD_MIN_DIFF_ENABLED,
         EMA_FAST, EMA_SLOW, EMA_MIN_DIFF_ENABLED,
         ATR_PERIOD, STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_OVERSOLD, STOCH_OVERBOUGHT, STOCH_ENABLED,
         BB_PERIOD, BB_STD_DEV, BB_WIDTH_MIN, BB_ENABLED,
@@ -1322,7 +1334,7 @@ def run_backtest_parallel():
         'macd_fast': MACD_FAST,
         'macd_slow': MACD_SLOW,
         'macd_signal': MACD_SIGNAL,
-        'macd_min_diff': MACD_MIN_DIFF,
+        'macd_min_diff_pct': MACD_MIN_DIFF_PCT,
         'macd_min_diff_enabled': MACD_MIN_DIFF_ENABLED,
         'ema_fast': EMA_FAST,
         'ema_slow': EMA_SLOW,
@@ -1412,7 +1424,7 @@ def run_backtest_one_at_a_time():
         RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT, RSI_MOMENTUM,
         RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT, RSI_TRENDING_MODE,
         RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
-        MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF, MACD_MIN_DIFF_ENABLED,
+        MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF_PCT, MACD_MIN_DIFF_ENABLED,
         EMA_FAST, EMA_SLOW, EMA_MIN_DIFF_ENABLED,
         ATR_PERIOD, STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_OVERSOLD, STOCH_OVERBOUGHT, STOCH_ENABLED,
         BB_PERIOD, BB_STD_DEV, BB_WIDTH_MIN, BB_ENABLED,
@@ -1445,7 +1457,7 @@ def run_backtest_one_at_a_time():
         'macd_fast': MACD_FAST,
         'macd_slow': MACD_SLOW,
         'macd_signal': MACD_SIGNAL,
-        'macd_min_diff': MACD_MIN_DIFF,
+        'macd_min_diff_pct': MACD_MIN_DIFF_PCT,
         'macd_min_diff_enabled': MACD_MIN_DIFF_ENABLED,
         'ema_fast': EMA_FAST,
         'ema_slow': EMA_SLOW,
@@ -1501,9 +1513,9 @@ def run_backtest_one_at_a_time():
     # Process each pair one at a time
     worker_results = []
     for i, pair in enumerate(PAIRS):
-        logger.warning(f"\n{'='*80}")
-        logger.warning(f"[{i+1}/{len(PAIRS)}] Processing pair: {pair}")
-        logger.warning(f"{'='*80}")
+        logger.warning(f"\n{'=' * 80}")
+        logger.warning(f"[{i + 1}/{len(PAIRS)}] Processing pair: {pair}")
+        logger.warning(f"{'=' * 80}")
 
         # Run backtest for this single pair
         result = run_backtest_worker(
@@ -1516,7 +1528,7 @@ def run_backtest_one_at_a_time():
         )
 
         worker_results.append(result)
-        logger.warning(f"✅ [{i+1}/{len(PAIRS)}] Completed {pair}: {result['signal_count']} signals")
+        logger.warning(f"✅ [{i + 1}/{len(PAIRS)}] Completed {pair}: {result['signal_count']} signals")
 
         # Aggressive memory cleanup for low-RAM systems
         from app.data_provider import clear_backtest_data

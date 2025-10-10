@@ -21,8 +21,34 @@ def send_alerts(signals, chat_id=None):
             chat_id = TELEGRAM_CHAT_ID
 
     if len(signals) == 1 and "summary" in signals[0]:
-        # Summary message - send as single message
-        _send_telegram_message(chat_id, signals[0]['summary'])
+        # Summary message - check length and split if needed
+        summary_text = signals[0]['summary']
+        MAX_MESSAGE_LENGTH = 4000  # Telegram's limit is 4096, use 4000 for safety
+
+        if len(summary_text) <= MAX_MESSAGE_LENGTH:
+            # Send as single message
+            _send_telegram_message(chat_id, summary_text)
+        else:
+            # Split into multiple messages if too long
+            lines = summary_text.split('\n')
+            current_message = ""
+            message_count = 0
+
+            for line in lines:
+                # Check if adding this line would exceed the limit
+                if len(current_message) + len(line) + 1 > MAX_MESSAGE_LENGTH:
+                    # Send current message and start new one
+                    if current_message:
+                        message_count += 1
+                        _send_telegram_message(chat_id, current_message)
+                        current_message = line + '\n'
+                else:
+                    current_message += line + '\n'
+
+            # Send remaining message
+            if current_message:
+                message_count += 1
+                _send_telegram_message(chat_id, current_message)
     else:
         # Signal alerts - batch to avoid hitting 4096 character limit
         MAX_MESSAGE_LENGTH = 3500  # Safe buffer under Telegram's 4096 limit

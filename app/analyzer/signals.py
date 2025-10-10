@@ -9,16 +9,11 @@ from ta.volatility import AverageTrueRange, BollingerBands
 from app.config import (
     USE_HIGHER_TF_CONFIRM, HIGHER_TF_MAP,
     USE_TREND_FILTER, TREND_MA_PERIOD, REQUIRED_MA_BARS,
-    RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
-    MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF,
-    EMA_FAST, EMA_SLOW,
+    RSI_PERIOD, MACD_FAST, MACD_SLOW, MACD_SIGNAL, EMA_FAST, EMA_SLOW,
     ATR_PERIOD, ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER,
-    SEND_UNCONFIRMED, ADX_PERIOD, RSI_MOMENTUM, ADX_RSI_MODE, MACD_MIN_DIFF_ENABLED,
-    EMA_MIN_DIFF_ENABLED, DYNAMIC_SCORE_ENABLED, MIN_SCORE_RANGING, MIN_ATR_RATIO,
+    SEND_UNCONFIRMED, ADX_PERIOD, DYNAMIC_SCORE_ENABLED, MIN_SCORE_RANGING, MIN_ATR_RATIO,
     MIN_SCORE_TRENDING, TIME_FILTER_ENABLED, TIME_FILTER_TIMEZONE, AVOID_HOURS_START, AVOID_HOURS_END,
-    VOLUME_CONFIRMATION_ENABLED, RSI_TRENDING_MODE, RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
-    RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT, STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_OVERSOLD, STOCH_OVERBOUGHT,
-    STOCH_ENABLED, BB_PERIOD, BB_STD_DEV, BB_WIDTH_MIN, BB_ENABLED,
+    STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_ENABLED, BB_PERIOD, BB_STD_DEV, BB_WIDTH_MIN, BB_ENABLED,
     get_min_score_for_timeframe, get_volume_ratio_for_timeframe, get_adx_threshold_for_timeframe
 )
 
@@ -122,11 +117,11 @@ def analyze_market(pairs, timeframe):
                 prev_candle_ts = data['timestamp'].iloc[-2] if len(data) >= 2 else None
 
                 indicators = get_indicators_from_cache(candle_ts, prev_candle_ts, indicators_cache, price)
-                conditions = get_conditions_from_cache(data, indicators, timeframe, sma_cache, pair_cache)
+                conditions = get_conditions_from_cache(data, indicators, timeframe, sma_cache, pair_cache, price)
             else:
                 # LIVE: Calculate from data
                 indicators = _calculate_technical_indicators(data, price)
-                conditions = _calculate_market_conditions(data, indicators, timeframe, pair)
+                conditions = _calculate_market_conditions(data, indicators, timeframe, pair, price)
 
             # SHARED: Analysis logic (same for both modes)
             long_score, short_score, min_score = _calculate_scores(indicators, conditions, timeframe)
@@ -378,29 +373,32 @@ def _evaluate_volume_and_atr(indicators, timeframe):
     """
     from app.config import VOLUME_CONFIRMATION_ENABLED, MIN_ATR_RATIO, get_volume_ratio_for_timeframe
 
-    volume_pass = not VOLUME_CONFIRMATION_ENABLED or indicators.volume_ratio >= (get_volume_ratio_for_timeframe(timeframe) - 0.01)
+    volume_pass = not VOLUME_CONFIRMATION_ENABLED or indicators.volume_ratio >= (
+                get_volume_ratio_for_timeframe(timeframe) - 0.01)
     atr_pass = indicators.atr_pct >= MIN_ATR_RATIO
     min_ema_separation = indicators.atr * 0.5
 
     return volume_pass, atr_pass, min_ema_separation
 
 
-def _evaluate_macd_momentum(indicators):
+def _evaluate_macd_momentum(indicators, price):
     """
     Evaluate MACD momentum conditions for long and short.
     Pure business logic - no mode-specific code.
 
     Args:
         indicators: TechnicalIndicators object
+        price: Current price
 
     Returns:
         Tuple of (momentum_ok_long, momentum_ok_short)
     """
-    from app.config import MACD_MIN_DIFF_ENABLED, MACD_MIN_DIFF
+    from app.config import MACD_MIN_DIFF_ENABLED, MACD_MIN_DIFF_PCT
 
     if MACD_MIN_DIFF_ENABLED:
-        momentum_ok_long = (indicators.macd > indicators.signal_line) and (indicators.diff >= MACD_MIN_DIFF)
-        momentum_ok_short = (indicators.macd < indicators.signal_line) and (indicators.diff <= -MACD_MIN_DIFF)
+        min_diff = price * MACD_MIN_DIFF_PCT
+        momentum_ok_long = (indicators.macd > indicators.signal_line) and (indicators.diff >= min_diff)
+        momentum_ok_short = (indicators.macd < indicators.signal_line) and (indicators.diff <= -min_diff)
     else:
         momentum_ok_long = indicators.macd > indicators.signal_line
         momentum_ok_short = indicators.macd < indicators.signal_line
@@ -545,7 +543,7 @@ def _evaluate_htf_confirmation(ht_rsi, ht_macd, ht_signal):
 
 
 def _evaluate_market_conditions(indicators, timeframe, trend_ok_long, trend_ok_short,
-                                 confirm_long, confirm_short):
+                                confirm_long, confirm_short, price):
     """
     Main orchestrator for evaluating all market conditions.
     Pure business logic - delegates to specialized evaluation functions.
@@ -557,13 +555,14 @@ def _evaluate_market_conditions(indicators, timeframe, trend_ok_long, trend_ok_s
         trend_ok_short: Trend filter result for short (from caller)
         confirm_long: HTF confirmation for long (from caller)
         confirm_short: HTF confirmation for short (from caller)
+        price: Current price
 
     Returns:
         MarketConditions object
     """
     # Evaluate all conditions using shared business logic
     volume_pass, atr_pass, min_ema_separation = _evaluate_volume_and_atr(indicators, timeframe)
-    momentum_ok_long, momentum_ok_short = _evaluate_macd_momentum(indicators)
+    momentum_ok_long, momentum_ok_short = _evaluate_macd_momentum(indicators, price)
     ema_ok_long, ema_ok_short = _evaluate_ema_conditions(indicators, min_ema_separation)
     rsi_ok_long, rsi_ok_short, is_trending = _evaluate_rsi_regime(indicators, timeframe)
     stoch_ok_long, stoch_ok_short = _evaluate_stochastic(indicators)
@@ -582,7 +581,7 @@ def _evaluate_market_conditions(indicators, timeframe, trend_ok_long, trend_ok_s
 # These functions handle data fetching/calculation (live) or cache lookup (backtest)
 # ============================================================================
 
-def _calculate_market_conditions(data, indicators, timeframe, pair):
+def _calculate_market_conditions(data, indicators, timeframe, pair, price):
     """
     Calculate all market conditions and filters (LIVE mode only).
     Handles mode-specific data fetching, then delegates to shared business logic.
@@ -595,6 +594,7 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
         indicators: TechnicalIndicators object
         timeframe: Trading timeframe
         pair: Trading pair
+        price: Current price
     """
     # MODE-SPECIFIC: Calculate trend filter from live data
     if USE_TREND_FILTER:
@@ -618,7 +618,7 @@ def _calculate_market_conditions(data, indicators, timeframe, pair):
 
     # SHARED: Delegate to shared business logic evaluator
     return _evaluate_market_conditions(indicators, timeframe, trend_ok_long, trend_ok_short,
-                                       confirm_long, confirm_short)
+                                       confirm_long, confirm_short, price)
 
 
 def _calculate_scores(indicators, conditions, timeframe):
@@ -834,7 +834,7 @@ def _generate_signal_details(pair, timeframe, side, price, indicators, condition
         "rsi_ok": conditions.rsi_ok_long if side == "LONG" else conditions.rsi_ok_short,
         "ema_ok": conditions.ema_ok_long if side == "LONG" else conditions.ema_ok_short,
         "macd_ok": (indicators.macd > indicators.signal_line) if side == "LONG" else (
-                    indicators.macd < indicators.signal_line),
+                indicators.macd < indicators.signal_line),
         "macd_momentum_ok": conditions.momentum_ok_long if side == "LONG" else conditions.momentum_ok_short,
         "stoch_ok": conditions.stoch_ok_long if side == "LONG" else conditions.stoch_ok_short,
         "rsi": indicators.rsi,

@@ -295,8 +295,9 @@ The system first determines market regime using ADX:
 - **Pullback Mode**: RSI 40-50 (LONG) / RSI 50-60 (SHORT) - for trend continuation
 
 #### **4. MACD Confirmation**
-- **LONG**: MACD > Signal Line + minimum histogram difference (0.8)
-- **SHORT**: MACD < Signal Line - minimum histogram difference (0.8)
+- **LONG**: MACD > Signal Line + minimum histogram difference (price × 0.02%)
+- **SHORT**: MACD < Signal Line - minimum histogram difference (price × 0.02%)
+- Minimum difference is now **percentage-based** (configured via `MACD_MIN_DIFF_PCT`)
 - If `MACD_MIN_DIFF_ENABLED=false`, only direction matters
 
 #### **5. EMA Trend Confirmation**
@@ -439,9 +440,11 @@ RSI_TRENDING_PULLBACK_SHORT=60 # Pullback mode: sell below this in downtrends
 MACD_FAST=12
 MACD_SLOW=26
 MACD_SIGNAL=9
-MACD_MIN_DIFF=0.8             # Minimum histogram difference
+MACD_MIN_DIFF_PCT=0.0002      # Minimum histogram difference as % of price (0.02% default)
 MACD_MIN_DIFF_ENABLED=true    # Require minimum histogram difference
 ```
+
+**Note**: The system uses `MACD_MIN_DIFF_PCT` (percentage-based threshold) to ensure fair signal generation across all price ranges. This fixes bias against low-priced coins where absolute thresholds would be impossible to achieve. With the default 0.0002 (0.02%), a coin at $100 needs min_diff of 0.02, while a coin at $0.50 needs only 0.0001 - making signals equitable for all assets.
 
 #### **EMA Configuration**
 ```bash

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.analyzer.signals import analyze_market
 from app.config import PAIRS, get_cooldown_for_timeframe
 from app.db.init_db import engine
-from app.db.tracker import check_hit_signals, summarize_and_notify
+from app.db.tracker import check_hit_signals, summarize_and_notify, get_configuration_snapshot
 from app.db.tracker import has_recent_pending, save_signal
 from app.exception_notifier import send_exception_notification
 from app.telegram_bot import send_alerts, send_tp1_alerts, send_signal_outcome_alerts
@@ -39,9 +39,15 @@ def run_analysis_job(timeframe):
 
 def run_midnight_summary_job():
     try:
+        # Send performance summary first
         summary = summarize_and_notify()
         if summary:
             send_alerts([{"side": "SUMMARY", "summary": summary}])
+
+        # Then send configuration snapshot in a separate message
+        config_snapshot = get_configuration_snapshot()
+        if config_snapshot:
+            send_alerts([{"side": "SUMMARY", "summary": config_snapshot}])
     except Exception as e:
         logger.error("Error in midnight summary job", exc_info=True)
         send_exception_notification(e, "run_midnight_summary_job", "Failed to generate daily summary")

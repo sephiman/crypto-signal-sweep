@@ -471,9 +471,14 @@ def summarize_and_notify() -> Optional[str]:
     # Add legend at the end
     lines.append("*Legend:* W=Win(TP2) BE=Breakeven(TP1) L=Loss")
 
-    # Add configuration snapshot
-    lines.append("")
-    lines.append("*CONFIGURATION SNAPSHOT*")
+    summary = "\n".join(lines)
+    logger.info(f"Trading performance summary:\n{summary}")
+    return summary
+
+
+def get_configuration_snapshot() -> str:
+    """Generate configuration snapshot message for daily summary."""
+    lines = ["⚙️ *Configuration Snapshot*", ""]
 
     # Import config values
     from app.config import (
@@ -481,7 +486,7 @@ def summarize_and_notify() -> Optional[str]:
         RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT, RSI_MOMENTUM,
         RSI_TRENDING_MODE, RSI_TRENDING_OVERSOLD, RSI_TRENDING_OVERBOUGHT,
         RSI_TRENDING_PULLBACK_LONG, RSI_TRENDING_PULLBACK_SHORT,
-        MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF, MACD_MIN_DIFF_ENABLED,
+        MACD_FAST, MACD_SLOW, MACD_SIGNAL, MACD_MIN_DIFF_PCT, MACD_MIN_DIFF_ENABLED,
         EMA_FAST, EMA_SLOW, EMA_MIN_DIFF_ENABLED,
         ATR_PERIOD, ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER,
         STOCH_ENABLED, STOCH_K_PERIOD, STOCH_D_PERIOD, STOCH_OVERSOLD, STOCH_OVERBOUGHT,
@@ -495,17 +500,17 @@ def summarize_and_notify() -> Optional[str]:
     )
 
     # TP/SL Settings
-    lines.append(f"TP/SL: ATR_PERIOD={ATR_PERIOD}, SL={ATR_SL_MULTIPLIER}x, TP={ATR_TP_MULTIPLIER}x")
+    lines.append(f"TP/SL: ATR\\_PERIOD={ATR_PERIOD}, SL={ATR_SL_MULTIPLIER}x, TP={ATR_TP_MULTIPLIER}x")
 
     # RSI Settings
     lines.append(f"RSI: PERIOD={RSI_PERIOD}, OS={RSI_OVERSOLD}, OB={RSI_OVERBOUGHT}, MOMENTUM={RSI_MOMENTUM}")
     if ADX_RSI_MODE == "adx":
-        lines.append(f"RSI_TREND: MODE={RSI_TRENDING_MODE}, OS={RSI_TRENDING_OVERSOLD}, OB={RSI_TRENDING_OVERBOUGHT}")
+        lines.append(f"RSI\\_TREND: MODE={RSI_TRENDING_MODE}, OS={RSI_TRENDING_OVERSOLD}, OB={RSI_TRENDING_OVERBOUGHT}")
         if RSI_TRENDING_MODE == "pullback":
-            lines.append(f"RSI_PULLBACK: LONG>{RSI_TRENDING_PULLBACK_LONG}, SHORT<{RSI_TRENDING_PULLBACK_SHORT}")
+            lines.append(f"RSI\\_PULLBACK: LONG>{RSI_TRENDING_PULLBACK_LONG}, SHORT<{RSI_TRENDING_PULLBACK_SHORT}")
 
     # MACD Settings
-    macd_diff_str = f", MIN_DIFF={MACD_MIN_DIFF}" if MACD_MIN_DIFF_ENABLED else ""
+    macd_diff_str = f", MIN\\_DIFF\\_PCT={MACD_MIN_DIFF_PCT}" if MACD_MIN_DIFF_ENABLED else ""
     lines.append(f"MACD: {MACD_FAST}/{MACD_SLOW}/{MACD_SIGNAL}{macd_diff_str}")
 
     # EMA Settings
@@ -518,7 +523,7 @@ def summarize_and_notify() -> Optional[str]:
 
     # Bollinger Bands
     if BB_ENABLED:
-        lines.append(f"BB: PERIOD={BB_PERIOD}, STD={BB_STD_DEV}, MIN_WIDTH={BB_WIDTH_MIN}")
+        lines.append(f"BB: PERIOD={BB_PERIOD}, STD={BB_STD_DEV}, MIN\\_WIDTH={BB_WIDTH_MIN}")
 
     # ADX Settings
     lines.append(f"ADX: PERIOD={ADX_PERIOD}, THRESHOLD={ADX_THRESHOLD}, MODE={ADX_RSI_MODE}")
@@ -540,7 +545,7 @@ def summarize_and_notify() -> Optional[str]:
     if DYNAMIC_SCORE_ENABLED:
         lines.append(f"SCORING: DEFAULT={MIN_SCORE_DEFAULT}, TREND={MIN_SCORE_TRENDING}, RANGE={MIN_SCORE_RANGING}")
         tf_scores = ", ".join([f"{tf}={score}" for tf, score in TIMEFRAME_MIN_SCORES.items() if tf in TIMEFRAMES])
-        lines.append(f"TF_SCORES: {tf_scores}")
+        lines.append(f"TF\\_SCORES: {tf_scores}")
     else:
         lines.append(f"SCORING: FIXED={MIN_SCORE_DEFAULT}")
 
@@ -548,9 +553,9 @@ def summarize_and_notify() -> Optional[str]:
     lines.append(f"PAIRS: {', '.join(PAIRS)}")
     lines.append(f"TIMEFRAMES: {', '.join(TIMEFRAMES)}")
 
-    summary = "\n".join(lines)
-    logger.info(f"Trading performance summary:\n{summary}")
-    return summary
+    config_snapshot = "\n".join(lines)
+    logger.info(f"Configuration snapshot:\n{config_snapshot}")
+    return config_snapshot
 
 
 # ============================================================================
