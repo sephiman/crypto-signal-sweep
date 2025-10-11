@@ -231,3 +231,160 @@ def send_signal_outcome_alerts(hit_updates):
         header = f"📊 *Signal Updates* ({i+1}/{len(batches)})" if len(batches) > 1 else "📊 *Signal Updates*"
         text = header + "\n" + "\n".join(batch)
         _send_telegram_message(TELEGRAM_CHAT_ID, text)
+
+
+def send_backtest_summary(run_id, mode, start_date, end_date, pairs, timeframes,
+                          total_trades, winners, losers, tp1_wins, win_rate,
+                          total_pnl, avg_pnl, execution_time, config_snapshot):
+    """
+    Send backtest completion summary with results and configuration snapshot.
+
+    Args:
+        run_id: Backtest run ID
+        mode: Backtest mode (sequential/parallel/one_pair_at_a_time)
+        start_date: Start date of backtest
+        end_date: End date of backtest
+        pairs: List of pairs tested
+        timeframes: List of timeframes tested
+        total_trades: Total number of trades
+        winners: Number of TP2 hits
+        losers: Number of SL hits
+        tp1_wins: Number of TP1 hits
+        win_rate: Win rate percentage
+        total_pnl: Total PnL percentage
+        avg_pnl: Average PnL per trade
+        execution_time: Execution time string (e.g., "1:23:45")
+        config_snapshot: Dict with configuration parameters
+    """
+    import json
+
+    # Format mode name
+    mode_display = {
+        'sequential': 'Sequential (All Pairs)',
+        'parallel': f'Parallel ({config_snapshot.get("parallel_workers", "?")} workers)',
+        'one_pair_at_a_time': 'One-Pair-at-a-Time'
+    }.get(mode, mode.title())
+
+    # Build results section
+    lines = [
+        "🎯 *BACKTEST COMPLETED*",
+        "",
+        "*Results:*",
+        f"Mode: {mode_display}",
+        f"Run ID: `{run_id}`",
+        f"Period: {start_date} to {end_date}",
+        f"Pairs: {len(pairs)} | Timeframes: {', '.join(timeframes)}",
+        f"Total Trades: {total_trades}",
+        f"  ✅ TP2: {winners} | 🎯 TP1: {tp1_wins} | ❌ SL: {losers}",
+        f"Win Rate: {win_rate:.1f}%",
+        f"Total PnL: {total_pnl:.2f}%",
+        f"Avg PnL/Trade: {avg_pnl:.2f}%",
+        f"Execution Time: {execution_time}",
+        "",
+        "*Configuration Snapshot:*"
+    ]
+
+    # Add key configuration parameters
+    cfg = config_snapshot
+
+    # TP/SL Settings
+    lines.extend([
+        "",
+        "*TP/SL Settings:*",
+        f"ATR Period: {cfg.get('atr_period', 'N/A')}",
+        f"SL Multiplier: {cfg.get('atr_sl_multiplier', 'N/A')}",
+        f"TP Multiplier: {cfg.get('atr_tp_multiplier', 'N/A')}"
+    ])
+
+    # RSI Settings
+    lines.extend([
+        "",
+        "*RSI Settings:*",
+        f"Period: {cfg.get('rsi_period', 'N/A')}",
+        f"Oversold/Overbought: {cfg.get('rsi_oversold', 'N/A')}/{cfg.get('rsi_overbought', 'N/A')}",
+        f"Momentum: {cfg.get('rsi_momentum', 'N/A')}",
+        f"Trending Mode: {cfg.get('rsi_trending_mode', 'N/A')}",
+    ])
+
+    if cfg.get('rsi_trending_mode'):
+        lines.extend([
+            f"Trending OS/OB: {cfg.get('rsi_trending_oversold', 'N/A')}/{cfg.get('rsi_trending_overbought', 'N/A')}",
+            f"Pullback L/S: {cfg.get('rsi_trending_pullback_long', 'N/A')}/{cfg.get('rsi_trending_pullback_short', 'N/A')}"
+        ])
+
+    # MACD Settings
+    lines.extend([
+        "",
+        "*MACD Settings:*",
+        f"Fast/Slow/Signal: {cfg.get('macd_fast', 'N/A')}/{cfg.get('macd_slow', 'N/A')}/{cfg.get('macd_signal', 'N/A')}",
+        f"Min Diff: {cfg.get('macd_min_diff_pct', 'N/A')}% (Enabled: {cfg.get('macd_min_diff_enabled', False)})"
+    ])
+
+    # EMA Settings
+    lines.extend([
+        "",
+        "*EMA Settings:*",
+        f"Fast/Slow: {cfg.get('ema_fast', 'N/A')}/{cfg.get('ema_slow', 'N/A')}",
+        f"Min Diff Enabled: {cfg.get('ema_min_diff_enabled', False)}"
+    ])
+
+    # ADX Settings
+    lines.extend([
+        "",
+        "*ADX Settings:*",
+        f"Period: {cfg.get('adx_period', 'N/A')}",
+        f"Threshold: {cfg.get('adx_threshold', 'N/A')}",
+        f"RSI Mode: {cfg.get('adx_rsi_mode', 'N/A')}"
+    ])
+
+    # Optional Indicators
+    if cfg.get('stoch_enabled'):
+        lines.extend([
+            "",
+            "*Stochastic:*",
+            f"K/D Period: {cfg.get('stoch_k_period', 'N/A')}/{cfg.get('stoch_d_period', 'N/A')}",
+            f"OS/OB: {cfg.get('stoch_oversold', 'N/A')}/{cfg.get('stoch_overbought', 'N/A')}"
+        ])
+
+    if cfg.get('bb_enabled'):
+        lines.extend([
+            "",
+            "*Bollinger Bands:*",
+            f"Period/StdDev: {cfg.get('bb_period', 'N/A')}/{cfg.get('bb_std_dev', 'N/A')}",
+            f"Min Width: {cfg.get('bb_width_min', 'N/A')}"
+        ])
+
+    # Filters and Confirmations
+    lines.extend([
+        "",
+        "*Filters & Confirmations:*",
+        f"Min ATR Ratio: {cfg.get('min_atr_ratio', 'N/A')}",
+        f"Volume Confirm: {cfg.get('volume_confirmation_enabled', False)} (Min: {cfg.get('min_volume_ratio', 'N/A')}x)",
+        f"Higher TF Confirm: {cfg.get('use_higher_tf_confirm', False)}",
+        f"Trend Filter: {cfg.get('use_trend_filter', False)} (MA Period: {cfg.get('trend_ma_period', 'N/A')})"
+    ])
+
+    # Scoring
+    lines.extend([
+        "",
+        "*Scoring:*",
+        f"Send Unconfirmed: {cfg.get('send_unconfirmed', False)}",
+        f"Dynamic Score: {cfg.get('dynamic_score_enabled', False)}",
+        f"Min Score Default: {cfg.get('min_score_default', 'N/A')}",
+        f"Min Score Trending/Ranging: {cfg.get('min_score_trending', 'N/A')}/{cfg.get('min_score_ranging', 'N/A')}"
+    ])
+
+    # Time Filter
+    if cfg.get('time_filter_enabled'):
+        lines.extend([
+            "",
+            "*Time Filter:*",
+            f"Timezone: {cfg.get('time_filter_timezone', 'N/A')}",
+            f"Avoid Hours: {cfg.get('avoid_hours_start', 'N/A')}-{cfg.get('avoid_hours_end', 'N/A')}"
+        ])
+
+    # Join all lines
+    summary_text = "\n".join(lines)
+
+    # Send via Telegram (use market chat ID for summaries)
+    send_alerts([{"summary": summary_text}], chat_id=TELEGRAM_MARKET_CHAT_ID)

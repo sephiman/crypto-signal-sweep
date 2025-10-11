@@ -20,6 +20,7 @@ from app.config import (
 from app.data_provider import set_backtest_data, set_backtest_timestamp
 from app.db.database import SessionLocal
 from app.db.models import HistoricalOHLCV, BacktestSignal, BacktestRun
+from app.telegram_bot import send_backtest_summary
 
 logger = logging.getLogger(__name__)
 
@@ -1117,6 +1118,40 @@ class BacktestEngine:
 
         db.commit()
 
+        # Send Telegram notification with results and config snapshot
+        try:
+            # Calculate execution time
+            execution_time = run.completed_at - run.created_at
+            execution_time_str = str(execution_time).split('.')[0]  # Remove microseconds
+
+            # Parse config snapshot
+            config_snapshot = json.loads(run.config_snapshot)
+
+            # Determine mode (sequential if not specified)
+            mode = config_snapshot.get('mode', 'sequential')
+
+            # Send Telegram summary
+            send_backtest_summary(
+                run_id=self.run_id,
+                mode=mode,
+                start_date=run.start_date.strftime('%Y-%m-%d'),
+                end_date=run.end_date.strftime('%Y-%m-%d'),
+                pairs=json.loads(run.pairs),
+                timeframes=json.loads(run.timeframes),
+                total_trades=total_trades,
+                winners=winners,
+                losers=losers,
+                tp1_wins=tp1_wins,
+                win_rate=win_rate,
+                total_pnl=total_pnl,
+                avg_pnl=avg_pnl,
+                execution_time=execution_time_str,
+                config_snapshot=config_snapshot
+            )
+            logger.warning(f"✅ Backtest summary sent to Telegram")
+        except Exception as e:
+            logger.error(f"Failed to send Telegram notification: {e}")
+
     def _fail_backtest_run(self, db: Session, error_message: str):
         """Mark backtest run as failed"""
         run = db.query(BacktestRun).filter(BacktestRun.run_id == self.run_id).first()
@@ -1259,6 +1294,40 @@ def merge_worker_results(main_run_id, worker_results):
         db.commit()
 
         logger.warning(f"✅ Merge complete: {total_trades} trades, {win_rate:.1f}% win rate")
+
+        # Send Telegram notification with results and config snapshot
+        try:
+            # Calculate execution time
+            execution_time = run.completed_at - run.created_at
+            execution_time_str = str(execution_time).split('.')[0]  # Remove microseconds
+
+            # Parse config snapshot
+            config_snapshot = json.loads(run.config_snapshot)
+
+            # Determine mode from config
+            mode = config_snapshot.get('mode', 'parallel')
+
+            # Send Telegram summary
+            send_backtest_summary(
+                run_id=main_run_id,
+                mode=mode,
+                start_date=run.start_date.strftime('%Y-%m-%d'),
+                end_date=run.end_date.strftime('%Y-%m-%d'),
+                pairs=json.loads(run.pairs),
+                timeframes=json.loads(run.timeframes),
+                total_trades=total_trades,
+                winners=winners,
+                losers=losers,
+                tp1_wins=tp1_wins,
+                win_rate=win_rate,
+                total_pnl=total_pnl,
+                avg_pnl=avg_pnl,
+                execution_time=execution_time_str,
+                config_snapshot=config_snapshot
+            )
+            logger.warning(f"✅ Backtest summary sent to Telegram")
+        except Exception as e:
+            logger.error(f"Failed to send Telegram notification: {e}")
 
     finally:
         db.close()
